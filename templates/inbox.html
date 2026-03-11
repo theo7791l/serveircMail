@@ -1,0 +1,175 @@
+{% extends 'base.html' %}
+{% block title %}Boîte de réception - {{ site_name }}{% endblock %}
+{% block content %}
+<div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <div class="s-logo-icon">✉</div>
+                <span class="s-logo-text">{{ site_name }}</span>
+            </div>
+            <button class="sidebar-toggle" id="sidebarToggle">☰</button>
+        </div>
+        <div class="user-badge">
+            <div class="user-avatar">{{ email[0].upper() if email else '?' }}</div>
+            <div class="user-info">
+                <span class="user-email">{{ email }}</span>
+                <span class="user-status"><span class="status-dot"></span> En ligne</span>
+            </div>
+        </div>
+        <button class="btn-compose" onclick="window.location='/compose'">
+            <span>✏️</span> Nouveau mail
+        </button>
+        <nav class="sidebar-nav" id="sidebarNav">
+            <div class="nav-section-title">Dossiers</div>
+            <div id="folderList"><div class="nav-loading">Chargement...</div></div>
+        </nav>
+        <div class="sidebar-footer">
+            <a href="/logout" class="btn-logout">🚪 Déconnexion</a>
+        </div>
+    </aside>
+    <main class="main-content">
+        <header class="topbar">
+            <div class="topbar-left">
+                <h2 class="topbar-title" id="folderTitle">📥 Boîte de réception</h2>
+                <span class="unread-badge" id="unreadBadge"></span>
+            </div>
+            <div class="topbar-right">
+                <div class="search-wrap">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" class="search-input" placeholder="Rechercher un mail..." id="searchInput">
+                </div>
+                <button class="btn-refresh" onclick="loadMails()" title="Rafraîchir">🔄</button>
+            </div>
+        </header>
+        <div class="mail-list" id="mailList">
+            <div class="loading-screen">
+                <div class="loader"></div>
+                <p>Chargement des mails...</p>
+            </div>
+        </div>
+        <div class="pagination" id="pagination"></div>
+    </main>
+</div>
+<script>
+let currentFolder = '{{ folder }}';
+let currentPage = {{ page }};
+let totalPages = 1;
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadFolders();
+    loadMails();
+    loadStats();
+});
+
+async function loadFolders() {
+    const res = await fetch('/api/folders');
+    const data = await res.json();
+    const nav = document.getElementById('folderList');
+    nav.innerHTML = '';
+    const icons = { 'INBOX': '📥', 'Sent': '📤', 'Drafts': '📝', 'Trash': '🗑️', 'Spam': '🚫', 'Archive': '📦' };
+    data.folders.forEach(f => {
+        const a = document.createElement('a');
+        a.className = 'nav-item' + (f === currentFolder ? ' active' : '');
+        a.href = '#';
+        a.innerHTML = `<span class="nav-icon">${icons[f] || '📁'}</span><span>${f}</span>`;
+        a.onclick = (e) => { e.preventDefault(); switchFolder(f, a); };
+        nav.appendChild(a);
+    });
+}
+
+async function switchFolder(folder, el) {
+    currentFolder = folder;
+    currentPage = 1;
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('folderTitle').textContent = el.textContent.trim();
+    loadMails();
+}
+
+async function loadMails() {
+    const list = document.getElementById('mailList');
+    list.innerHTML = '<div class="loading-screen"><div class="loader"></div><p>Chargement...</p></div>';
+    const res = await fetch(`/api/mails?folder=${encodeURIComponent(currentFolder)}&page=${currentPage}&per_page=20`);
+    const data = await res.json();
+    totalPages = data.pages;
+    renderMails(data.mails);
+    renderPagination(data.page, data.pages, data.total);
+}
+
+function renderMails(mails) {
+    const list = document.getElementById('mailList');
+    const search = document.getElementById('searchInput').value.toLowerCase();
+    let filtered = mails;
+    if (search) filtered = mails.filter(m => m.subject.toLowerCase().includes(search) || m.from.toLowerCase().includes(search));
+    if (!filtered.length) {
+        list.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><p>Aucun mail dans ce dossier</p></div>';
+        return;
+    }
+    list.innerHTML = '';
+    filtered.forEach((m, i) => {
+        const item = document.createElement('div');
+        item.className = 'mail-item' + (m.seen ? '' : ' unread');
+        item.style.animationDelay = `${i * 40}ms`;
+        item.innerHTML = `
+            <div class="mail-avatar">${m.from[0].toUpperCase()}</div>
+            <div class="mail-body">
+                <div class="mail-header-row">
+                    <span class="mail-from">${escHtml(m.from)}</span>
+                    <span class="mail-date">${formatDate(m.date)}</span>
+                </div>
+                <div class="mail-subject">${escHtml(m.subject)}</div>
+            </div>
+            ${!m.seen ? '<span class="unread-dot"></span>' : ''}
+        `;
+        item.onclick = () => window.location = `/mail/${m.uid}?folder=${encodeURIComponent(currentFolder)}`;
+        list.appendChild(item);
+        requestAnimationFrame(() => item.classList.add('in'));
+    });
+}
+
+function renderPagination(page, pages, total) {
+    const pg = document.getElementById('pagination');
+    if (pages <= 1) { pg.innerHTML = ''; return; }
+    pg.innerHTML = `
+        <button class="pg-btn" onclick="goPage(${page-1})" ${page<=1?'disabled':''}>← Précédent</button>
+        <span class="pg-info">${page} / ${pages} <span class="pg-total">(${total} mails)</span></span>
+        <button class="pg-btn" onclick="goPage(${page+1})" ${page>=pages?'disabled':''}>Suivant →</button>
+    `;
+}
+
+function goPage(p) {
+    if (p < 1 || p > totalPages) return;
+    currentPage = p;
+    loadMails();
+}
+
+async function loadStats() {
+    const res = await fetch('/api/stats');
+    const data = await res.json();
+    const badge = document.getElementById('unreadBadge');
+    if (data.unseen > 0) {
+        badge.textContent = `${data.unseen} non lu${data.unseen > 1 ? 's' : ''}`;
+        badge.style.display = 'inline-flex';
+    }
+}
+
+document.getElementById('searchInput').addEventListener('input', () => loadMails());
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatDate(d) {
+    if (!d) return '';
+    try {
+        const date = new Date(d);
+        const now = new Date();
+        const diff = now - date;
+        if (diff < 86400000) return date.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
+        if (diff < 604800000) return date.toLocaleDateString('fr-FR', {weekday:'short'});
+        return date.toLocaleDateString('fr-FR', {day:'2-digit', month:'short'});
+    } catch { return d; }
+}
+</script>
+{% endblock %}

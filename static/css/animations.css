@@ -1,0 +1,130 @@
+/* ====== KEYFRAMES ====== */
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInDown {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+@keyframes logoPulse {
+    0%, 100% { box-shadow: 0 4px 15px rgba(108,99,255,0.4); }
+    50% { box-shadow: 0 4px 30px rgba(108,99,255,0.8), 0 0 60px rgba(62,198,224,0.3); }
+}
+
+@keyframes floatOrb {
+    0% { transform: translate(0, 0) scale(1); }
+    50% { transform: translate(40px, -30px) scale(1.1); }
+    100% { transform: translate(-20px, 20px) scale(0.95); }
+}
+
+@keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
+
+@keyframes badgeIn {
+    from { opacity: 0; transform: scale(0.5); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(8px); }
+    60% { transform: translateX(-5px); }
+    80% { transform: translateX(5px); }
+}
+
+@keyframes particleFloat {
+    0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 0.3; }
+    100% { transform: translateY(-100vh) rotate(720deg); opacity: 0; }
+}
+
+@keyframes glowPulse {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+}
+
+@keyframes shimmer {
+    0% { background-position: -200% center; }
+    100% { background-position: 200% center; }
+}
+
+@keyframes ripple {
+    0% { transform: scale(0); opacity: 1; }
+    100% { transform: scale(4); opacity: 0; }
+}
+
+/* ====== ANIMATION CLASSES ====== */
+
+[data-animate="fadeInUp"] {
+    animation: fadeInUp 0.6s cubic-bezier(.175,.885,.32,1.275) forwards;
+}
+
+[data-animate="fadeInDown"] {
+    animation: fadeInDown 0.5s ease forwards;
+}
+
+[data-animate="shake"] {
+    animation: shake 0.5s ease forwards;
+}
+
+/* ====== TRANSITION UTILITIES ====== */
+
+.transition-all { transition: all 0.3s ease; }
+.transition-fast { transition: all 0.15s ease; }
+.transition-slow { transition: all 0.6s ease; }
+
+/* ====== GLOW EFFECTS ====== */
+
+.glow-text {
+    text-shadow: 0 0 20px rgba(108,99,255,0.6);
+}
+
+.glow-border {
+    box-shadow: 0 0 0 1px var(--border-glow), 0 8px 32px rgba(108,99,255,0.15);
+}
+
+.shimmer-bg {
+    background: linear-gradient(90deg, transparent 0%, rgba(108,99,255,0.1) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
+}
+
+/* ====== PAGE TRANSITION ====== */
+
+body {
+    animation: fadeIn 0.4s ease;
+}
+
+/* ====== HOVER GLOW CARD ====== */
+
+.hover-glow {
+    transition: box-shadow 0.3s, border-color 0.3s, transform 0.3s;
+}
+
+.hover-glow:hover {
+    box-shadow: 0 0 0 1px var(--border-glow), 0 12px 40px rgba(108,99,255,0.2);
+    border-color: var(--border-glow) !important;
+    transform: translateY(-3px);
+}
