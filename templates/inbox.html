@@ -1,175 +1,144 @@
 {% extends 'base.html' %}
-{% block title %}Boîte de réception - {{ site_name }}{% endblock %}
+{% block title %}Boîte de réception — {{ site_name }}{% endblock %}
+{% block page_title %}<i class="fa fa-inbox" style="color:var(--primary)"></i> Boîte de réception{% endblock %}
+{% block topbar_actions %}
+<button class="topbar-btn" onclick="loadMails()" title="Rafraîchir"><i class="fa fa-rotate-right"></i></button>
+{% endblock %}
 {% block content %}
-<div class="app-layout">
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="sidebar-logo">
-                <div class="s-logo-icon">✉</div>
-                <span class="s-logo-text">{{ site_name }}</span>
-            </div>
-            <button class="sidebar-toggle" id="sidebarToggle">☰</button>
+<div style="display:flex;gap:24px;height:calc(100vh - 64px - 56px);">
+
+  <!-- Dossiers -->
+  <div class="card" style="width:220px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;height:fit-content;min-height:200px;">
+    <div class="card-body" style="padding:16px 12px;">
+      <a href="/compose" class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:16px;">
+        <i class="fa fa-pen-to-square"></i> Nouveau mail
+      </a>
+      <div style="font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);padding:0 4px 8px;">Dossiers</div>
+      <div id="folderList">
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;background:var(--bg-card);color:var(--text);font-size:13px;font-weight:500;">
+          <i class="fa fa-circle-notch fa-spin" style="color:var(--primary)"></i> Chargement...
         </div>
-        <div class="user-badge">
-            <div class="user-avatar">{{ email[0].upper() if email else '?' }}</div>
-            <div class="user-info">
-                <span class="user-email">{{ email }}</span>
-                <span class="user-status"><span class="status-dot"></span> En ligne</span>
-            </div>
-        </div>
-        <button class="btn-compose" onclick="window.location='/compose'">
-            <span>✏️</span> Nouveau mail
-        </button>
-        <nav class="sidebar-nav" id="sidebarNav">
-            <div class="nav-section-title">Dossiers</div>
-            <div id="folderList"><div class="nav-loading">Chargement...</div></div>
-        </nav>
-        <div class="sidebar-footer">
-            <a href="/logout" class="btn-logout">🚪 Déconnexion</a>
-        </div>
-    </aside>
-    <main class="main-content">
-        <header class="topbar">
-            <div class="topbar-left">
-                <h2 class="topbar-title" id="folderTitle">📥 Boîte de réception</h2>
-                <span class="unread-badge" id="unreadBadge"></span>
-            </div>
-            <div class="topbar-right">
-                <div class="search-wrap">
-                    <span class="search-icon">🔍</span>
-                    <input type="text" class="search-input" placeholder="Rechercher un mail..." id="searchInput">
-                </div>
-                <button class="btn-refresh" onclick="loadMails()" title="Rafraîchir">🔄</button>
-            </div>
-        </header>
-        <div class="mail-list" id="mailList">
-            <div class="loading-screen">
-                <div class="loader"></div>
-                <p>Chargement des mails...</p>
-            </div>
-        </div>
-        <div class="pagination" id="pagination"></div>
-    </main>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mail list -->
+  <div class="card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border);">
+      <h2 id="folderTitle" style="font-size:16px;font-weight:700;flex:1;"><i class="fa fa-inbox" style="color:var(--primary)"></i> Boîte de réception</h2>
+      <span id="unreadBadge" class="nav-badge" style="display:none;"></span>
+      <div class="search-bar" style="max-width:280px;">
+        <input type="text" placeholder="Rechercher..." id="searchInput" />
+        <i class="fa fa-magnifying-glass search-icon"></i>
+      </div>
+    </div>
+    <div id="mailList" style="flex:1;overflow-y:auto;">
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:12px;color:var(--text-muted);">
+        <div class="loader"></div>
+        <p style="font-size:13px;">Chargement des mails...</p>
+      </div>
+    </div>
+    <div id="pagination" style="border-top:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:12px;"></div>
+  </div>
 </div>
+
 <script>
 let currentFolder = '{{ folder }}';
 let currentPage = {{ page }};
 let totalPages = 1;
+const folderIcons = { 'INBOX':'fa-inbox', 'Sent':'fa-paper-plane', 'Drafts':'fa-file-lines', 'Trash':'fa-trash', 'Spam':'fa-shield-virus', 'Archive':'fa-box-archive' };
 
-document.addEventListener('DOMContentLoaded', () => {
-    loadFolders();
-    loadMails();
-    loadStats();
-});
+document.addEventListener('DOMContentLoaded', () => { loadFolders(); loadMails(); loadStats(); });
 
 async function loadFolders() {
-    const res = await fetch('/api/folders');
-    const data = await res.json();
-    const nav = document.getElementById('folderList');
-    nav.innerHTML = '';
-    const icons = { 'INBOX': '📥', 'Sent': '📤', 'Drafts': '📝', 'Trash': '🗑️', 'Spam': '🚫', 'Archive': '📦' };
-    data.folders.forEach(f => {
-        const a = document.createElement('a');
-        a.className = 'nav-item' + (f === currentFolder ? ' active' : '');
-        a.href = '#';
-        a.innerHTML = `<span class="nav-icon">${icons[f] || '📁'}</span><span>${f}</span>`;
-        a.onclick = (e) => { e.preventDefault(); switchFolder(f, a); };
-        nav.appendChild(a);
-    });
+  const res = await fetch('/api/folders');
+  const data = await res.json();
+  const nav = document.getElementById('folderList');
+  nav.innerHTML = '';
+  data.folders.forEach(f => {
+    const a = document.createElement('a');
+    a.className = 'nav-item' + (f === currentFolder ? ' active' : '');
+    a.href = '#';
+    const icon = folderIcons[f] || 'fa-folder';
+    a.innerHTML = `<i class="fa ${icon} nav-icon"></i><span>${f}</span>`;
+    a.onclick = e => { e.preventDefault(); switchFolder(f, a); };
+    nav.appendChild(a);
+  });
 }
 
 async function switchFolder(folder, el) {
-    currentFolder = folder;
-    currentPage = 1;
-    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-    el.classList.add('active');
-    document.getElementById('folderTitle').textContent = el.textContent.trim();
-    loadMails();
+  currentFolder = folder; currentPage = 1;
+  document.querySelectorAll('#folderList .nav-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('folderTitle').innerHTML = `<i class="fa ${folderIcons[folder] || 'fa-folder'}" style="color:var(--primary)"></i> ${folder}`;
+  loadMails();
 }
 
 async function loadMails() {
-    const list = document.getElementById('mailList');
-    list.innerHTML = '<div class="loading-screen"><div class="loader"></div><p>Chargement...</p></div>';
-    const res = await fetch(`/api/mails?folder=${encodeURIComponent(currentFolder)}&page=${currentPage}&per_page=20`);
-    const data = await res.json();
-    totalPages = data.pages;
-    renderMails(data.mails);
-    renderPagination(data.page, data.pages, data.total);
+  const list = document.getElementById('mailList');
+  list.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;padding:60px 20px;gap:12px;color:var(--text-muted);"><div class="loader"></div><p style="font-size:13px;">Chargement...</p></div>`;
+  const res = await fetch(`/api/mails?folder=${encodeURIComponent(currentFolder)}&page=${currentPage}&per_page=20`);
+  const data = await res.json();
+  totalPages = data.pages;
+  renderMails(data.mails);
+  renderPagination(data.page, data.pages, data.total);
 }
 
 function renderMails(mails) {
-    const list = document.getElementById('mailList');
-    const search = document.getElementById('searchInput').value.toLowerCase();
-    let filtered = mails;
-    if (search) filtered = mails.filter(m => m.subject.toLowerCase().includes(search) || m.from.toLowerCase().includes(search));
-    if (!filtered.length) {
-        list.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><p>Aucun mail dans ce dossier</p></div>';
-        return;
-    }
-    list.innerHTML = '';
-    filtered.forEach((m, i) => {
-        const item = document.createElement('div');
-        item.className = 'mail-item' + (m.seen ? '' : ' unread');
-        item.style.animationDelay = `${i * 40}ms`;
-        item.innerHTML = `
-            <div class="mail-avatar">${m.from[0].toUpperCase()}</div>
-            <div class="mail-body">
-                <div class="mail-header-row">
-                    <span class="mail-from">${escHtml(m.from)}</span>
-                    <span class="mail-date">${formatDate(m.date)}</span>
-                </div>
-                <div class="mail-subject">${escHtml(m.subject)}</div>
-            </div>
-            ${!m.seen ? '<span class="unread-dot"></span>' : ''}
-        `;
-        item.onclick = () => window.location = `/mail/${m.uid}?folder=${encodeURIComponent(currentFolder)}`;
-        list.appendChild(item);
-        requestAnimationFrame(() => item.classList.add('in'));
-    });
+  const list = document.getElementById('mailList');
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  let filtered = mails;
+  if (search) filtered = mails.filter(m => m.subject.toLowerCase().includes(search) || m.from.toLowerCase().includes(search));
+  if (!filtered.length) {
+    list.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px;gap:16px;color:var(--text-muted);"><i class="fa fa-envelope-open" style="font-size:48px;opacity:0.2;"></i><p style="font-size:14px;">Aucun mail dans ce dossier</p></div>`;
+    return;
+  }
+  list.innerHTML = '';
+  filtered.forEach((m, i) => {
+    const item = document.createElement('a');
+    item.className = 'mail-item' + (m.seen ? '' : ' unread');
+    item.href = `/mail/${m.uid}?folder=${encodeURIComponent(currentFolder)}`;
+    item.style.animationDelay = `${i * 35}ms`;
+    item.innerHTML = `
+      ${!m.seen ? '<span class="mail-unread-dot"></span>' : '<span style="width:8px;flex-shrink:0;"></span>'}
+      <div class="avatar avatar-sm" style="background:linear-gradient(135deg,var(--primary),var(--accent2));flex-shrink:0;">${esc(m.from)[0].toUpperCase()}</div>
+      <div class="mail-info">
+        <div class="mail-from">${esc(m.from)}</div>
+        <div class="mail-subject">${esc(m.subject)}</div>
+      </div>
+      <div class="mail-date">${fmtDate(m.date)}</div>`;
+    list.appendChild(item);
+  });
 }
 
 function renderPagination(page, pages, total) {
-    const pg = document.getElementById('pagination');
-    if (pages <= 1) { pg.innerHTML = ''; return; }
-    pg.innerHTML = `
-        <button class="pg-btn" onclick="goPage(${page-1})" ${page<=1?'disabled':''}>← Précédent</button>
-        <span class="pg-info">${page} / ${pages} <span class="pg-total">(${total} mails)</span></span>
-        <button class="pg-btn" onclick="goPage(${page+1})" ${page>=pages?'disabled':''}>Suivant →</button>
-    `;
+  const pg = document.getElementById('pagination');
+  if (pages <= 1) { pg.innerHTML = `<span style="font-size:12px;color:var(--text-muted);">${total} mail${total>1?'s':''}</span>`; return; }
+  pg.innerHTML = `
+    <button class="btn btn-ghost btn-sm" onclick="goPage(${page-1})" ${page<=1?'disabled':''}><i class="fa fa-chevron-left"></i></button>
+    <span style="font-size:12px;color:var(--text-muted);">${page} / ${pages} &nbsp;(${total} mails)</span>
+    <button class="btn btn-ghost btn-sm" onclick="goPage(${page+1})" ${page>=pages?'disabled':''}><i class="fa fa-chevron-right"></i></button>`;
 }
 
-function goPage(p) {
-    if (p < 1 || p > totalPages) return;
-    currentPage = p;
-    loadMails();
-}
+function goPage(p) { if (p<1||p>totalPages) return; currentPage=p; loadMails(); }
 
 async function loadStats() {
-    const res = await fetch('/api/stats');
-    const data = await res.json();
-    const badge = document.getElementById('unreadBadge');
-    if (data.unseen > 0) {
-        badge.textContent = `${data.unseen} non lu${data.unseen > 1 ? 's' : ''}`;
-        badge.style.display = 'inline-flex';
-    }
+  const res = await fetch('/api/stats');
+  const data = await res.json();
+  const b = document.getElementById('unreadBadge');
+  if (data.unseen > 0) { b.textContent = data.unseen; b.style.display = 'inline-flex'; }
 }
 
 document.getElementById('searchInput').addEventListener('input', () => loadMails());
-
-function escHtml(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-function formatDate(d) {
-    if (!d) return '';
-    try {
-        const date = new Date(d);
-        const now = new Date();
-        const diff = now - date;
-        if (diff < 86400000) return date.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
-        if (diff < 604800000) return date.toLocaleDateString('fr-FR', {weekday:'short'});
-        return date.toLocaleDateString('fr-FR', {day:'2-digit', month:'short'});
-    } catch { return d; }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmtDate(d) {
+  if (!d) return '';
+  try {
+    const date = new Date(d), now = new Date(), diff = now - date;
+    if (diff < 86400000) return date.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    if (diff < 604800000) return date.toLocaleDateString('fr-FR',{weekday:'short'});
+    return date.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'});
+  } catch { return d; }
 }
 </script>
 {% endblock %}

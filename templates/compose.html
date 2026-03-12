@@ -1,123 +1,99 @@
 {% extends 'base.html' %}
-{% block title %}Rédiger - {{ site_name }}{% endblock %}
+{% block title %}Rédiger — {{ site_name }}{% endblock %}
+{% block page_title %}<i class="fa fa-pen-to-square" style="color:var(--primary)"></i> Nouveau message{% endblock %}
 {% block content %}
-<div class="app-layout">
-    <aside class="sidebar">
-        <div class="sidebar-header">
-            <div class="sidebar-logo">
-                <div class="s-logo-icon">✉</div>
-                <span class="s-logo-text">{{ site_name }}</span>
-            </div>
+<div style="max-width:860px;margin:0 auto;">
+  <div class="card">
+    <div class="card-body" style="padding:28px 32px;">
+
+      <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
+        <i class="fa fa-circle-info" style="color:var(--text-muted);font-size:13px;"></i>
+        <span style="font-size:13px;color:var(--text-muted);">De : <strong style="color:var(--text);">{{ email }}</strong></span>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label"><i class="fa fa-at"></i> Destinataire</label>
+        <input class="form-input" type="email" id="toInput" value="{{ reply_to }}" placeholder="destinataire@exemple.com" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label"><i class="fa fa-tag"></i> Sujet</label>
+        <input class="form-input" type="text" id="subjectInput" value="{{ subject }}" placeholder="Objet du message" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label"><i class="fa fa-align-left"></i> Message</label>
+        <div class="compose-toolbar">
+          <button class="toolbar-btn" type="button" onclick="fmt('bold')" title="Gras"><i class="fa fa-bold"></i></button>
+          <button class="toolbar-btn" type="button" onclick="fmt('italic')" title="Italique"><i class="fa fa-italic"></i></button>
+          <button class="toolbar-btn" type="button" onclick="fmt('underline')" title="Souligner"><i class="fa fa-underline"></i></button>
+          <button class="toolbar-btn" type="button" onclick="fmt('strikeThrough')" title="Barrer"><i class="fa fa-strikethrough"></i></button>
+          <div style="width:1px;background:var(--border);margin:0 4px;"></div>
+          <button class="toolbar-btn" type="button" onclick="fmt('insertUnorderedList')" title="Liste"><i class="fa fa-list-ul"></i></button>
+          <button class="toolbar-btn" type="button" onclick="fmt('insertOrderedList')" title="Liste numérotée"><i class="fa fa-list-ol"></i></button>
+          <div style="width:1px;background:var(--border);margin:0 4px;"></div>
+          <button class="toolbar-btn" type="button" onclick="toggleHtml()" id="htmlToggle" title="Mode HTML"><i class="fa fa-code"></i></button>
         </div>
-        <div class="user-badge">
-            <div class="user-avatar">{{ email[0].upper() if email else '?' }}</div>
-            <div class="user-info">
-                <span class="user-email">{{ email }}</span>
-                <span class="user-status"><span class="status-dot"></span> En ligne</span>
-            </div>
-        </div>
-        <button class="btn-compose active" onclick="window.location='/compose'">✏️ Nouveau mail</button>
-        <nav class="sidebar-nav">
-            <a class="nav-item" href="/inbox"><span class="nav-icon">📥</span><span>Boîte de réception</span></a>
-        </nav>
-        <div class="sidebar-footer">
-            <a href="/logout" class="btn-logout">🚪 Déconnexion</a>
-        </div>
-    </aside>
-    <main class="main-content compose-view">
-        <div class="compose-card" data-animate="fadeInUp">
-            <div class="compose-header">
-                <h2>✏️ Nouveau message</h2>
-                <div class="compose-from">De : <strong>{{ email }}</strong></div>
-            </div>
-            <div class="compose-body">
-                <div class="compose-field">
-                    <label>À :</label>
-                    <input type="email" id="toInput" value="{{ reply_to }}" placeholder="destinataire@example.com" required>
-                </div>
-                <div class="compose-field">
-                    <label>Sujet :</label>
-                    <input type="text" id="subjectInput" value="{{ subject }}" placeholder="Objet du message">
-                </div>
-                <div class="compose-editor">
-                    <div class="editor-toolbar">
-                        <button type="button" onclick="fmt('bold')"><b>B</b></button>
-                        <button type="button" onclick="fmt('italic')"><i>I</i></button>
-                        <button type="button" onclick="fmt('underline')"><u>U</u></button>
-                        <span class="toolbar-sep"></span>
-                        <button type="button" onclick="fmt('insertUnorderedList')">• Liste</button>
-                        <button type="button" onclick="fmt('insertOrderedList')">1. Liste</button>
-                        <span class="toolbar-sep"></span>
-                        <button type="button" onclick="toggleHtml()" id="htmlToggle">HTML</button>
-                    </div>
-                    <div id="editorArea" class="editor-area" contenteditable="true"></div>
-                </div>
-                <div class="compose-actions">
-                    <button class="btn-send" id="sendBtn" onclick="sendMail()">
-                        <span class="btn-text">Envoyer</span>
-                        <span class="btn-icon">🚀</span>
-                    </button>
-                    <button class="btn-discard" onclick="window.location='/inbox'">✕ Annuler</button>
-                </div>
-                <div class="send-status" id="sendStatus"></div>
-            </div>
-        </div>
-    </main>
+        <div id="editorArea" contenteditable="true"
+          style="min-height:260px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:14px;outline:none;line-height:1.6;transition:var(--transition);"
+          onfocus="this.style.borderColor='var(--primary)';this.style.background='rgba(108,99,255,0.04)'"
+          onblur="this.style.borderColor='var(--border)';this.style.background='rgba(255,255,255,0.03)'"></div>
+      </div>
+
+      <div style="display:flex;gap:12px;align-items:center;">
+        <button class="btn btn-primary btn-lg" id="sendBtn" onclick="sendMail()">
+          <i class="fa fa-paper-plane"></i> Envoyer
+        </button>
+        <a href="/inbox" class="btn btn-ghost"><i class="fa fa-xmark"></i> Annuler</a>
+        <div id="sendStatus" style="display:none;font-size:13px;margin-left:8px;"></div>
+      </div>
+
+    </div>
+  </div>
 </div>
 <script>
 function fmt(cmd) { document.execCommand(cmd, false, null); }
 let htmlMode = false;
 function toggleHtml() {
-    const area = document.getElementById('editorArea');
-    htmlMode = !htmlMode;
-    document.getElementById('htmlToggle').classList.toggle('active', htmlMode);
-    if (htmlMode) {
-        const raw = document.createElement('textarea');
-        raw.id = 'htmlArea';
-        raw.value = area.innerHTML;
-        raw.className = 'editor-html';
-        area.replaceWith(raw);
-    } else {
-        const raw = document.getElementById('htmlArea');
-        const newArea = document.createElement('div');
-        newArea.id = 'editorArea';
-        newArea.className = 'editor-area';
-        newArea.contentEditable = 'true';
-        newArea.innerHTML = raw.value;
-        raw.replaceWith(newArea);
-    }
+  const area = document.getElementById('editorArea');
+  htmlMode = !htmlMode;
+  document.getElementById('htmlToggle').classList.toggle('active', htmlMode);
+  if (htmlMode) {
+    const ta = document.createElement('textarea');
+    ta.id = 'editorArea';
+    ta.value = area.innerHTML;
+    ta.style = 'min-height:260px;width:100%;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:13px;font-family:"JetBrains Mono",monospace;outline:none;resize:vertical;';
+    area.replaceWith(ta);
+  } else {
+    const ta = document.getElementById('editorArea');
+    const div = document.createElement('div');
+    div.id = 'editorArea'; div.contentEditable = 'true';
+    div.style = 'min-height:260px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:14px;outline:none;line-height:1.6;';
+    div.innerHTML = ta.value; ta.replaceWith(div);
+  }
 }
 async function sendMail() {
-    const to = document.getElementById('toInput').value;
-    const subject = document.getElementById('subjectInput').value;
-    const isHtml = htmlMode;
-    const body = htmlMode ? document.getElementById('htmlArea').value : document.getElementById('editorArea').innerHTML;
-    if (!to) { showStatus('❌ Destinataire requis', 'error'); return; }
-    const btn = document.getElementById('sendBtn');
-    btn.disabled = true;
-    btn.querySelector('.btn-text').textContent = 'Envoi...';
-    btn.querySelector('.btn-icon').textContent = '⏳';
-    const res = await fetch('/api/send', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({to, subject, body, html: isHtml})
-    });
-    const data = await res.json();
-    if (data.success) {
-        showStatus('✅ Mail envoyé avec succès !', 'success');
-        setTimeout(() => window.location='/inbox', 1500);
-    } else {
-        showStatus('❌ ' + (data.error || 'Erreur inconnue'), 'error');
-        btn.disabled = false;
-        btn.querySelector('.btn-text').textContent = 'Envoyer';
-        btn.querySelector('.btn-icon').textContent = '🚀';
-    }
+  const to = document.getElementById('toInput').value;
+  const subject = document.getElementById('subjectInput').value;
+  const body = htmlMode ? document.getElementById('editorArea').value : document.getElementById('editorArea').innerHTML;
+  if (!to) { showStatus('Destinataire requis', 'error'); return; }
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = true; btn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Envoi en cours...';
+  const res = await fetch('/api/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({to, subject, body, html: htmlMode}) });
+  const data = await res.json();
+  if (data.success) {
+    showStatus('Mail envoyé !', 'success');
+    setTimeout(() => window.location='/inbox', 1500);
+  } else {
+    showStatus(data.error || 'Erreur inconnue', 'error');
+    btn.disabled = false; btn.innerHTML = '<i class="fa fa-paper-plane"></i> Envoyer';
+  }
 }
 function showStatus(msg, type) {
-    const el = document.getElementById('sendStatus');
-    el.textContent = msg;
-    el.className = 'send-status ' + type;
-    el.style.display = 'flex';
+  const el = document.getElementById('sendStatus');
+  el.style.display = 'flex'; el.style.alignItems = 'center'; el.style.gap = '6px';
+  el.style.color = type === 'success' ? 'var(--accent3)' : 'var(--accent2)';
+  el.innerHTML = `<i class="fa fa-${type==='success'?'check-circle':'circle-xmark'}"></i> ${msg}`;
 }
 </script>
 {% endblock %}

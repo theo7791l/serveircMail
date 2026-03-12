@@ -1,51 +1,85 @@
 {% extends "base.html" %}
-{% block page_title %}<i class="fa fa-user-circle"></i> Profil{% endblock %}
+{% block title %}Profil — {{ site_name }}{% endblock %}
+{% block page_title %}<i class="fa fa-user-circle" style="color:var(--primary)"></i> Mon profil{% endblock %}
 {% block content %}
-<div class="profile-page">
-  {% if request.query_params.get('success') %}<div class="alert alert-success"><i class="fa fa-check"></i> Profil mis à jour !</div>{% endif %}
-  <div class="profile-header">
-    <div class="profile-avatar-big" style="background:{{ current_user.avatar_color }}">{{ current_user.display_name[0]|upper }}</div>
-    <div>
-      <h2>{{ current_user.display_name }}</h2>
-      <div class="role-pill" style="background:{{ user_role.color if user_role else '#6C63FF' }}">{{ user_role.display_name if user_role else 'User' }}</div>
-      <p class="text-muted">{{ current_user.email }}</p>
+
+{% if request.query_params.get('success') %}
+<div style="background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.3);color:var(--accent3);padding:12px 18px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px;display:flex;align-items:center;gap:8px;">
+  <i class="fa fa-check-circle"></i> Profil mis à jour avec succès !
+</div>
+{% endif %}
+
+<div class="grid-2">
+
+  <!-- Info utilisateur -->
+  <div class="card">
+    <div class="card-body">
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--border);">
+        <div class="avatar avatar-lg" style="background:{{ current_user.avatar_color or '#6C63FF' }};">{{ current_user.display_name[0]|upper }}</div>
+        <div>
+          <div style="font-size:18px;font-weight:800;color:var(--text);">{{ current_user.display_name }}</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-top:2px;">@{{ current_user.username }}</div>
+          {% if user_role %}
+          <div style="display:inline-flex;align-items:center;gap:5px;margin-top:6px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;background:color-mix(in srgb,{{ user_role.color }} 15%,transparent);border:1px solid color-mix(in srgb,{{ user_role.color }} 40%,transparent);color:{{ user_role.color }};">
+            <i class="fa fa-shield-halved"></i> {{ user_role.display_name }}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+          <span style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);font-weight:600;">Email</span>
+          <span style="font-size:13px;color:var(--text);">{{ current_user.email }}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+          <span style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);font-weight:600;">Dernière connexion</span>
+          <span style="font-size:13px;color:var(--text);">{{ current_user.last_login or 'N/A' }}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+          <span style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);font-weight:600;">Membre depuis</span>
+          <span style="font-size:13px;color:var(--text);">{{ current_user.created_at }}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;">
+          <span style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);font-weight:600;">Statut</span>
+          <span class="badge badge-active"><i class="fa fa-circle" style="font-size:7px;"></i> {% if current_user.is_active %}Actif{% else %}Suspendu{% endif %}</span>
+        </div>
+      </div>
+
+      {% if user_perms %}
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);">
+        <div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px;">Permissions</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          {% for perm in user_perms %}
+          <span class="badge badge-perm"><i class="fa fa-check" style="font-size:9px;"></i> {{ perm }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
     </div>
   </div>
-  <div class="cards-grid">
-    <div class="card">
-      <div class="card-header"><i class="fa fa-pencil"></i> Modifier le profil</div>
-      <form method="post" action="/profile" class="auth-form">
+
+  <!-- Modifier le profil -->
+  <div class="card">
+    <div class="card-body">
+      <h3 style="font-size:15px;font-weight:700;margin-bottom:20px;display:flex;align-items:center;gap:8px;"><i class="fa fa-pen" style="color:var(--primary);"></i> Modifier le profil</h3>
+      <form method="post" action="/profile">
         <div class="form-group">
-          <label>Nom affiché</label>
-          <input type="text" name="display_name" value="{{ current_user.display_name }}" required />
+          <label class="form-label">Nom affiché</label>
+          <input class="form-input" type="text" name="display_name" value="{{ current_user.display_name }}" required />
         </div>
         <div class="form-group">
-          <label>Nouveau mot de passe du site <span class="text-muted">(laisser vide = inchangé)</span></label>
-          <input type="password" name="new_password" placeholder="Nouveau mot de passe" />
+          <label class="form-label">Nouveau mot de passe du site <span style="color:var(--text-dim);font-size:10px;">(laisser vide = inchangé)</span></label>
+          <input class="form-input" type="password" name="new_password" placeholder="••••••••" />
         </div>
         <div class="form-group">
-          <label>Mot de passe mail IMAP/SMTP</label>
-          <input type="password" name="mail_password" value="{{ current_user.mail_password }}" placeholder="Mot de passe boîte mail" />
+          <label class="form-label">Mot de passe IMAP/SMTP <span style="color:var(--text-dim);font-size:10px;">(boîte mail)</span></label>
+          <input class="form-input" type="password" name="mail_password" value="{{ current_user.mail_password }}" placeholder="Mot de passe boîte mail" />
         </div>
-        <button type="submit" class="btn btn-primary"><i class="fa fa-save"></i> Enregistrer</button>
+        <button type="submit" class="btn btn-primary"><i class="fa fa-floppy-disk"></i> Enregistrer les modifications</button>
       </form>
     </div>
-    <div class="card">
-      <div class="card-header"><i class="fa fa-info-circle"></i> Informations</div>
-      <div class="info-list">
-        <div class="info-item"><span>Nom d'utilisateur</span><strong>{{ current_user.username }}</strong></div>
-        <div class="info-item"><span>Email</span><strong>{{ current_user.email }}</strong></div>
-        <div class="info-item"><span>Dernière connexion</span><strong>{{ current_user.last_login or 'N/A' }}</strong></div>
-        <div class="info-item"><span>Membre depuis</span><strong>{{ current_user.created_at }}</strong></div>
-        <div class="info-item"><span>Statut</span><strong class="badge-active">{% if current_user.is_active %}Actif{% else %}Suspendu{% endif %}</strong></div>
-      </div>
-      <div class="card-header" style="margin-top:1.5rem"><i class="fa fa-shield-check"></i> Permissions</div>
-      <div class="perms-grid">
-        {% for perm in user_perms %}
-        <div class="perm-chip"><i class="fa fa-check"></i> {{ perm }}</div>
-        {% endfor %}
-      </div>
-    </div>
   </div>
+
 </div>
 {% endblock %}
