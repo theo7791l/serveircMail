@@ -10,17 +10,19 @@ import os
 def _get_mail_config(user: dict) -> dict:
     from database import get_setting
 
-    imap_host = user.get('imap_host') or get_setting('global_imap_host') or os.getenv('IMAP_HOST', '')
+    # IMAP (reception)
+    imap_host = user.get('imap_host') or get_setting('global_imap_host') or os.getenv('IMAP_HOST', 'imap.gmail.com')
     imap_port = int(user.get('imap_port') or get_setting('global_imap_port', '993') or 993)
-    smtp_host = user.get('smtp_host') or get_setting('global_smtp_host') or os.getenv('SMTP_HOST', 'smtp.gmail.com')
-    smtp_port = int(user.get('smtp_port') or get_setting('global_smtp_port', '465') or 465)
-    smtp_enc  = get_setting('global_smtp_encryption', 'SSL')
+    imap_user = get_setting('global_imap_user') or os.getenv('IMAP_USER', '')
+    imap_pass = get_setting('global_mail_password') or os.getenv('EMAIL_PASSWORD', '')
 
-    # IMAP/SMTP auth = global Gmail account (App Password)
-    mail_user = get_setting('global_imap_user') or os.getenv('IMAP_USER', '')
-    mail_pass = get_setting('global_mail_password') or os.getenv('EMAIL_PASSWORD', '')
+    # SMTP (envoi via Mailtrap)
+    smtp_host = get_setting('global_smtp_host') or os.getenv('SMTP_HOST', 'live.smtp.mailtrap.io')
+    smtp_port = int(get_setting('global_smtp_port', '587') or 587)
+    smtp_user = get_setting('global_smtp_user') or os.getenv('SMTP_USER', 'api')
+    smtp_pass = get_setting('global_smtp_password') or os.getenv('SMTP_PASSWORD', '')
 
-    # Alias = From address shown to recipients (e.g. jean@youtube.serveirc.com)
+    # Alias = adresse From affichee au destinataire
     alias = (
         user.get('mail_alias')
         or user.get('mail_username')
@@ -30,11 +32,12 @@ def _get_mail_config(user: dict) -> dict:
     return {
         'imap_host': imap_host,
         'imap_port': imap_port,
+        'imap_user': imap_user,
+        'imap_pass': imap_pass,
         'smtp_host': smtp_host,
         'smtp_port': smtp_port,
-        'smtp_enc':  smtp_enc,
-        'mail_user': mail_user,
-        'mail_pass': mail_pass,
+        'smtp_user': smtp_user,
+        'smtp_pass': smtp_pass,
         'alias':     alias,
     }
 
@@ -42,7 +45,7 @@ def _get_mail_config(user: dict) -> dict:
 def get_imap_connection(user: dict):
     cfg = _get_mail_config(user)
     mail = imaplib.IMAP4_SSL(cfg['imap_host'], cfg['imap_port'])
-    mail.login(cfg['mail_user'], cfg['mail_pass'])
+    mail.login(cfg['imap_user'], cfg['imap_pass'])
     return mail
 
 
@@ -92,11 +95,10 @@ def get_mails(user: dict, folder: str = 'INBOX', page: int = 1, per_page: int = 
                             result += str(part)
                     return result
 
-                to_val = msg.get('To', '')
                 mails.append({
                     'uid': uid.decode(),
                     'from': _decode_header(msg.get('From', '')),
-                    'to': to_val,
+                    'to': msg.get('To', ''),
                     'subject': _decode_header(msg.get('Subject', '')) or '(Sans objet)',
                     'date': msg.get('Date', ''),
                     'seen': seen,
@@ -163,21 +165,19 @@ def get_mail(user: dict, uid: str, folder: str = 'INBOX'):
 
 def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False):
     """
-    Send via Gmail SMTP (App Password).
-    The SMTP login is always the global Gmail account.
-    The From: header is set to the user's alias (e.g. jean@youtube.serveirc.com)
-    so recipients see the correct address.
-    Gmail allows sending with a custom From: if the address is added in
-    Gmail Settings > Accounts > Send mail as.
+    Envoi via Mailtrap SMTP (live.smtp.mailtrap.io).
+    - Login SMTP : SMTP_USER ("api") + SMTP_PASSWORD (cle API Mailtrap)
+    - From: = alias de l'utilisateur (ex: jean@youtube.serveirc.com)
+    Le destinataire voit directement l'adresse alias sans "via".
     """
     cfg = _get_mail_config(user)
-    from_addr = cfg['alias'] or cfg['mail_user']
+    from_addr = cfg['alias'] or cfg['imap_user']
 
     try:
         msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From']    = from_addr
-        msg['To']      = to
+        msg['Subject']  = subject
+        msg['From']     = from_addr
+        msg['To']       = to
         msg['Reply-To'] = from_addr
 
         if html:
@@ -185,15 +185,14 @@ def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False):
         else:
             msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
-        if cfg['smtp_enc'] == 'SSL':
-            server = smtplib.SMTP_SSL(cfg['smtp_host'], cfg['smtp_port'])
-        else:
-            server = smtplib.SMTP(cfg['smtp_host'], cfg['smtp_port'])
-            server.starttls()
-
-        server.login(cfg['mail_user'], cfg['mail_pass'])
-        # sendmail envelope sender = Gmail account, From header = alias
-        server.sendmail(cfg['mail_user'], to, msg.as_string())
+        # Mailtrap utilise STARTTLS sur le port 587
+        server = smtplib.SMTP(cfg['smtp_host'], cfg['smtp_port'])
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(cfg['smtp_user'], cfg['smtp_pass'])
+        # envelope sender = alias (Mailtrap l'autorise si le domaine est verifie)
+        server.sendmail(from_addr, to, msg.as_string())
         server.quit()
         return True, None
     except Exception as e:
