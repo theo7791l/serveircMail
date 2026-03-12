@@ -7,7 +7,8 @@ import uvicorn
 import os
 import database as db
 import auth
-from email_client import get_imap_connection, get_mails, get_mail, send_mail, delete_mail, test_imap_connection, _get_mail_config
+import email_client
+from email_client import test_imap_connection
 from config import settings
 
 db.init_db()
@@ -88,13 +89,11 @@ async def register(request: Request,
     else:
         mail_alias = email
 
-    # Check alias not already taken
     if mail_domain and mail_alias_prefix:
         existing = db.get_user_by_alias(mail_alias)
         if existing:
             return RedirectResponse("/register?error=alias_taken", status_code=302)
 
-    # Check username/email not already taken
     if db.get_user_by_username(username):
         return RedirectResponse("/register?error=username_taken", status_code=302)
     if db.get_user_by_email(email):
@@ -103,14 +102,13 @@ async def register(request: Request,
     ip = auth.get_client_ip(request)
     code = db.create_pending_user(username, display_name, email, password, mail_alias)
 
-    # Send verification email
-    admin_user = {
-        "mail_username": db.get_setting("global_imap_user", ""),
-        "mail_password": db.get_setting("global_mail_password", ""),
-        "imap_host": "", "smtp_host": "", "imap_port": 993, "smtp_port": 465,
+    # Send verification email via global admin config
+    sender_user = {
+        "mail_alias": db.get_setting("mail_domain", "") and f"noreply@{db.get_setting('mail_domain','')}",
+        "email": db.get_setting("global_imap_user", ""),
     }
-    body = f"""Bonjour {display_name},\n\nVotre code de vérification pour activer votre compte serveircMail est :\n\n    {code}\n\nCe code expire dans 15 minutes.\n\nSi vous n'avez pas demandé cette inscription, ignorez cet email."""
-    send_mail(admin_user, to=email, subject="[serveircMail] Code de vérification", body=body)
+    body = f"""Bonjour {display_name},\n\nVotre code de v\u00e9rification pour activer votre compte serveircMail est :\n\n    {code}\n\nCe code expire dans 15 minutes.\n\nSi vous n'avez pas demand\u00e9 cette inscription, ignorez cet email."""
+    email_client.send_mail(sender_user, to=email, subject="[serveircMail] Code de v\u00e9rification", body=body)
     db.add_audit_log(None, username, "REGISTER_PENDING", ip=ip, details=f"alias={mail_alias}")
 
     return render("verify.html", request, {"email": email, "error": ""})
@@ -314,13 +312,12 @@ async def admin_save_settings(request: Request, user=Depends(auth.require_perm("
 
 @app.get("/api/folders")
 async def api_folders(user=Depends(auth.require_auth)):
-    return {"folders": get_imap_connection(user) and __import__('email_client').get_folders(user)}
+    return {"folders": email_client.get_folders(user)}
 
 @app.get("/api/mails")
 async def api_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20, user=Depends(auth.require_auth)):
-    result = get_mails(user, folder=folder, page=page, per_page=per_page)
-    # Filter: only show mails addressed to this user's alias
-    alias = user.get("mail_alias", "") or user.get("mail_username", "") or user.get("email", "")
+    result = email_client.get_mails(user, folder=folder, page=page, per_page=per_page)
+    alias = user.get("mail_alias", "") or user.get("email", "")
     if alias and result.get("mails"):
         result["mails"] = [
             m for m in result["mails"]
@@ -331,12 +328,11 @@ async def api_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20, us
 
 @app.get("/api/mail/{uid}")
 async def api_mail(uid: int, folder: str = "INBOX", user=Depends(auth.require_auth)):
-    mail = get_mail(user, uid=str(uid), folder=folder)
-    # Security: verify this mail is addressed to this user
-    alias = user.get("mail_alias", "") or user.get("mail_username", "") or user.get("email", "")
+    mail = email_client.get_mail(user, uid=str(uid), folder=folder)
+    alias = user.get("mail_alias", "") or user.get("email", "")
     if alias and "to" in mail:
         if alias.lower() not in mail["to"].lower():
-            raise HTTPException(403, detail="Ce mail ne vous est pas adressé")
+            raise HTTPException(403, detail="Ce mail ne vous est pas adress\u00e9")
     return mail
 
 @app.post("/api/send")
@@ -344,11 +340,8 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
     if not db.user_has_perm(user["id"], "can_send_mail"):
         raise HTTPException(403)
     data = await request.json()
-    # Force From to be user's alias
-    alias = user.get("mail_alias", "") or user.get("mail_username", "") or user.get("email", "")
-    user_with_alias = dict(user)
-    user_with_alias["mail_username"] = alias
-    ok, err = send_mail(user_with_alias, to=data.get("to"), subject=data.get("subject"), body=data.get("body"), html=data.get("html", False))
+    # The alias is already in user['mail_alias'] — email_client will use it as From:
+    ok, err = email_client.send_mail(user, to=data.get("to"), subject=data.get("subject"), body=data.get("body"), html=data.get("html", False))
     if ok:
         db.add_audit_log(user["id"], user["username"], "SEND_MAIL", target=data.get("to"))
     return {"success": ok, "error": err}
@@ -357,22 +350,17 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
 async def api_delete(uid: int, folder: str = "INBOX", user=Depends(auth.require_auth)):
     if not db.user_has_perm(user["id"], "can_delete_mail"):
         raise HTTPException(403)
-    ok, err = delete_mail(user, uid=str(uid), folder=folder)
+    ok, err = email_client.delete_mail(user, uid=str(uid), folder=folder)
     return {"success": ok, "error": err}
 
 @app.get("/api/moderation/mails")
 async def api_moderation_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20,
     user=Depends(auth.require_perm("can_view_all_mails"))):
-    # Use global admin account — no filtering
     admin_user = {
-        "mail_username": db.get_setting("global_imap_user", ""),
-        "mail_password": db.get_setting("global_mail_password", ""),
-        "imap_host": db.get_setting("global_imap_host", ""),
-        "imap_port": int(db.get_setting("global_imap_port", "993")),
-        "smtp_host": db.get_setting("global_smtp_host", ""),
-        "smtp_port": int(db.get_setting("global_smtp_port", "465")),
+        "mail_alias": "",
+        "email": db.get_setting("global_imap_user", ""),
     }
-    return get_mails(admin_user, folder=folder, page=page, per_page=per_page)
+    return email_client.get_mails(admin_user, folder=folder, page=page, per_page=per_page)
 
 @app.post("/api/admin/test-mail-connection")
 async def api_test_mail(user=Depends(auth.require_perm("can_change_settings"))):
@@ -381,9 +369,29 @@ async def api_test_mail(user=Depends(auth.require_perm("can_change_settings"))):
     mail_user = db.get_setting("global_imap_user", "")
     mail_pass = db.get_setting("global_mail_password", "")
     if not host or not mail_user or not mail_pass:
-        return JSONResponse({"success": False, "error": "Paramètres IMAP incomplets dans les settings"})
+        return JSONResponse({"success": False, "error": "Param\u00e8tres IMAP incomplets dans les settings"})
     ok, result = test_imap_connection(host, port, mail_user, mail_pass)
     return JSONResponse({"success": ok, "mailbox": result if ok else "", "error": result if not ok else ""})
+
+@app.post("/api/admin/test-resend")
+async def api_test_resend(user=Depends(auth.require_perm("can_change_settings"))):
+    api_key = db.get_setting("resend_api_key", "")
+    if not api_key:
+        return JSONResponse({"success": False, "error": "Aucune cl\u00e9 Resend configur\u00e9e"})
+    mail_domain = db.get_setting("mail_domain", "")
+    from_addr = f"noreply@{mail_domain}" if mail_domain else db.get_setting("global_imap_user", "")
+    admin_email = db.get_setting("global_imap_user", "")
+    if not admin_email:
+        return JSONResponse({"success": False, "error": "Adresse Gmail admin non configur\u00e9e"})
+    ok, result = email_client._send_via_resend(
+        api_key=api_key,
+        from_addr=from_addr,
+        to=admin_email,
+        subject="[serveircMail] Test Resend",
+        body="Test de connexion Resend r\u00e9ussi ! L'envoi depuis votre domaine fonctionne correctement.",
+        html=False
+    )
+    return JSONResponse({"success": ok, "id": result if ok else "", "error": result if not ok else ""})
 
 @app.get("/api/stats")
 async def api_stats(user=Depends(auth.require_auth)):
