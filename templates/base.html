@@ -4,86 +4,115 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}{{ site_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/style.css" />
-  <link rel="stylesheet" href="/static/css/animations.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/animations.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 </head>
 <body>
-  <div id="particles-bg"></div>
+  <canvas id="particles-canvas"></canvas>
   <div class="glow-orb glow-orb-1"></div>
   <div class="glow-orb glow-orb-2"></div>
   <div class="glow-orb glow-orb-3"></div>
+
   {% if maintenance_mode == '1' and current_user and current_user.role_id != 1 %}
-  <div class="maintenance-banner"><i class="fa fa-wrench"></i> Mode maintenance actif</div>
+  <div style="position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,rgba(255,101,132,0.9),rgba(108,99,255,0.9));backdrop-filter:blur(10px);padding:10px 20px;text-align:center;font-size:13px;font-weight:600;color:white;">
+    <i class="fa fa-wrench"></i> Mode maintenance actif &mdash; Seuls les administrateurs peuvent accéder au site.
+  </div>
   {% endif %}
+
   {% if current_user %}
-  <div class="app-layout">
+  <div class="app-wrapper">
     <!-- SIDEBAR -->
     <aside class="sidebar" id="sidebar">
-      <div class="sidebar-logo">
-        <div class="logo-icon"><i class="fa fa-envelope-open-text"></i></div>
-        <span class="logo-text">{{ site_name }}</span>
-      </div>
+      <a href="/inbox" class="sidebar-logo">
+        <div class="sidebar-logo-icon"><i class="fa fa-envelope-open-text"></i></div>
+        <span class="sidebar-logo-text">{{ site_name }}</span>
+      </a>
+
+      <a href="/profile" class="sidebar-user">
+        <div class="avatar" style="background:{{ current_user.avatar_color or '#6C63FF' }}">{{ current_user.display_name[0]|upper }}</div>
+        <div class="user-info">
+          <div class="user-name">{{ current_user.display_name }}</div>
+          <div class="user-role">@{{ current_user.username }}</div>
+        </div>
+        <i class="fa fa-chevron-right" style="font-size:12px;color:var(--text-dim)"></i>
+      </a>
+
       <nav class="sidebar-nav">
-        <div class="nav-section-label">Mail</div>
-        <a href="/inbox" class="nav-item {% if request.url.path == '/inbox' %}active{% endif %}">
-          <i class="fa fa-inbox"></i><span>Boîte de réception</span>
-          <span class="badge" id="unread-badge" style="display:none"></span>
+        <div class="nav-section-title">Messagerie</div>
+        <a href="/inbox" class="nav-item {% if '/inbox' in request.url.path or request.url.path == '/' %}active{% endif %}">
+          <i class="fa fa-inbox nav-icon"></i><span>Boîte de réception</span>
+          <span class="nav-badge" id="unread-badge" style="display:none"></span>
         </a>
-        <a href="/compose" class="nav-item {% if request.url.path == '/compose' %}active{% endif %}">
-          <i class="fa fa-pen-to-square"></i><span>Composer</span>
+        <a href="/compose" class="nav-item {% if '/compose' in request.url.path %}active{% endif %}">
+          <i class="fa fa-pen-to-square nav-icon"></i><span>Composer</span>
         </a>
+
+        <!-- Dynamic folders -->
         <div id="folders-list"></div>
-        {% if 'can_view_stats' in user_perms or 'can_manage_users' in user_perms %}
-        <div class="nav-section-label">Administration</div>
-        <a href="/admin" class="nav-item {% if '/admin' in request.url.path %}active{% endif %}">
-          <i class="fa fa-gauge-high"></i><span>Dashboard</span>
+
+        {% if 'can_view_stats' in user_perms or 'can_manage_users' in user_perms or 'can_manage_roles' in user_perms or 'can_view_logs' in user_perms or 'can_change_settings' in user_perms %}
+        <div class="nav-section-title" style="margin-top:8px">Administration</div>
+        {% if 'can_view_stats' in user_perms %}
+        <a href="/admin" class="nav-item {% if request.url.path == '/admin' %}active{% endif %}">
+          <i class="fa fa-gauge-high nav-icon"></i><span>Dashboard</span>
         </a>
+        {% endif %}
         {% if 'can_manage_users' in user_perms %}
-        <a href="/admin/users" class="nav-item"><i class="fa fa-users"></i><span>Utilisateurs</span></a>
+        <a href="/admin/users" class="nav-item {% if '/admin/users' in request.url.path %}active{% endif %}">
+          <i class="fa fa-users nav-icon"></i><span>Utilisateurs</span>
+        </a>
         {% endif %}
         {% if 'can_manage_roles' in user_perms %}
-        <a href="/admin/roles" class="nav-item"><i class="fa fa-shield-halved"></i><span>Rôles</span></a>
+        <a href="/admin/roles" class="nav-item {% if '/admin/roles' in request.url.path %}active{% endif %}">
+          <i class="fa fa-shield-halved nav-icon"></i><span>Rôles &amp; Permissions</span>
+        </a>
         {% endif %}
         {% if 'can_view_logs' in user_perms %}
-        <a href="/admin/logs" class="nav-item"><i class="fa fa-scroll"></i><span>Audit Logs</span></a>
+        <a href="/admin/logs" class="nav-item {% if '/admin/logs' in request.url.path %}active{% endif %}">
+          <i class="fa fa-scroll nav-icon"></i><span>Audit Logs</span>
+        </a>
         {% endif %}
         {% if 'can_change_settings' in user_perms %}
-        <a href="/admin/settings" class="nav-item"><i class="fa fa-sliders"></i><span>Paramètres</span></a>
+        <a href="/admin/settings" class="nav-item {% if '/admin/settings' in request.url.path %}active{% endif %}">
+          <i class="fa fa-sliders nav-icon"></i><span>Paramètres</span>
+        </a>
         {% endif %}
         {% endif %}
       </nav>
+
       <div class="sidebar-footer">
-        <a href="/profile" class="user-card">
-          <div class="user-avatar" style="background:{{ current_user.avatar_color }}">{{ current_user.display_name[0]|upper }}</div>
-          <div class="user-info">
-            <div class="user-name">{{ current_user.display_name }}</div>
-            <div class="user-role-badge">{{ current_user.username }}</div>
-          </div>
-          <i class="fa fa-gear"></i>
+        <a href="/logout" class="nav-item" style="color:var(--accent2)">
+          <i class="fa fa-right-from-bracket nav-icon"></i><span>Déconnexion</span>
         </a>
-        <a href="/logout" class="logout-btn"><i class="fa fa-right-from-bracket"></i></a>
       </div>
     </aside>
+
     <!-- MAIN -->
     <main class="main-content">
       <div class="topbar">
-        <button class="sidebar-toggle" onclick="toggleSidebar()"><i class="fa fa-bars"></i></button>
+        <button class="topbar-btn" onclick="toggleSidebar()" id="sidebar-toggle"><i class="fa fa-bars"></i></button>
         <div class="topbar-title">{% block page_title %}{% endblock %}</div>
-        <div class="topbar-actions">{% block topbar_actions %}{% endblock %}</div>
+        <div class="topbar-actions">
+          {% block topbar_actions %}{% endblock %}
+          <a href="/compose" class="topbar-btn" title="Composer"><i class="fa fa-pen"></i></a>
+          <a href="/profile" class="topbar-btn" title="Profil"><i class="fa fa-user"></i></a>
+        </div>
       </div>
       <div class="page-content">
         {% block content %}{% endblock %}
       </div>
     </main>
   </div>
+
   {% else %}
   {% block auth_content %}{% endblock %}
   {% endif %}
+
   <div id="toast-container"></div>
-  <script src="/static/js/main.js"></script>
+  <script src="/static/main.js"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
