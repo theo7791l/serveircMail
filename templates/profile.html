@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block page_title %}<i class="fa fa-user-circle"></i> Profil{% endblock %}
+{% block content %}
+<div class="profile-page">
+  {% if request.query_params.get('success') %}<div class="alert alert-success"><i class="fa fa-check"></i> Profil mis à jour !</div>{% endif %}
+  <div class="profile-header">
+    <div class="profile-avatar-big" style="background:{{ current_user.avatar_color }}">{{ current_user.display_name[0]|upper }}</div>
+    <div>
+      <h2>{{ current_user.display_name }}</h2>
+      <div class="role-pill" style="background:{{ user_role.color if user_role else '#6C63FF' }}">{{ user_role.display_name if user_role else 'User' }}</div>
+      <p class="text-muted">{{ current_user.email }}</p>
+    </div>
+  </div>
+  <div class="cards-grid">
+    <div class="card">
+      <div class="card-header"><i class="fa fa-pencil"></i> Modifier le profil</div>
+      <form method="post" action="/profile" class="auth-form">
+        <div class="form-group">
+          <label>Nom affiché</label>
+          <input type="text" name="display_name" value="{{ current_user.display_name }}" required />
+        </div>
+        <div class="form-group">
+          <label>Nouveau mot de passe du site <span class="text-muted">(laisser vide = inchangé)</span></label>
+          <input type="password" name="new_password" placeholder="Nouveau mot de passe" />
+        </div>
+        <div class="form-group">
+          <label>Mot de passe mail IMAP/SMTP</label>
+          <input type="password" name="mail_password" value="{{ current_user.mail_password }}" placeholder="Mot de passe boîte mail" />
+        </div>
+        <button type="submit" class="btn btn-primary"><i class="fa fa-save"></i> Enregistrer</button>
+      </form>
+    </div>
+    <div class="card">
+      <div class="card-header"><i class="fa fa-info-circle"></i> Informations</div>
+      <div class="info-list">
+        <div class="info-item"><span>Nom d'utilisateur</span><strong>{{ current_user.username }}</strong></div>
+        <div class="info-item"><span>Email</span><strong>{{ current_user.email }}</strong></div>
+        <div class="info-item"><span>Dernière connexion</span><strong>{{ current_user.last_login or 'N/A' }}</strong></div>
+        <div class="info-item"><span>Membre depuis</span><strong>{{ current_user.created_at }}</strong></div>
+        <div class="info-item"><span>Statut</span><strong class="badge-active">{% if current_user.is_active %}Actif{% else %}Suspendu{% endif %}</strong></div>
+      </div>
+      <div class="card-header" style="margin-top:1.5rem"><i class="fa fa-shield-check"></i> Permissions</div>
+      <div class="perms-grid">
+        {% for perm in user_perms %}
+        <div class="perm-chip"><i class="fa fa-check"></i> {{ perm }}</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,120 +1,151 @@
-// ====== PARTICLES ======
+// serveircMail — Main JavaScript
+
+// ========== PARTICLES ==========
 function initParticles() {
-    const container = document.getElementById('particles');
-    if (!container) return;
-    const count = 30;
-    for (let i = 0; i < count; i++) {
-        const p = document.createElement('div');
-        const size = Math.random() * 3 + 1;
-        const x = Math.random() * 100;
-        const delay = Math.random() * 15;
-        const duration = Math.random() * 15 + 10;
-        const opacity = Math.random() * 0.4 + 0.1;
-        p.style.cssText = `
-            position: absolute;
-            left: ${x}%;
-            bottom: -10px;
-            width: ${size}px;
-            height: ${size}px;
-            border-radius: 50%;
-            background: ${Math.random() > 0.5 ? 'rgba(108,99,255,' : 'rgba(62,198,224,'}${opacity});
-            animation: particleFloat ${duration}s ${delay}s linear infinite;
-            pointer-events: none;
-        `;
-        container.appendChild(p);
-    }
-}
-
-// ====== ANIMATE ON LOAD ======
-function initAnimations() {
-    const cards = document.querySelectorAll('.login-card, .compose-card, .read-card');
-    cards.forEach(el => {
-        requestAnimationFrame(() => {
-            setTimeout(() => el.classList.add('in'), 50);
-        });
-    });
-}
-
-// ====== RIPPLE EFFECT ======
-function initRipple() {
-    document.querySelectorAll('.btn-login, .btn-compose, .btn-send').forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            const ripple = document.createElement('span');
-            const rect = this.getBoundingClientRect();
-            ripple.style.cssText = `
-                position: absolute;
-                left: ${e.clientX - rect.left}px;
-                top: ${e.clientY - rect.top}px;
-                width: 10px;
-                height: 10px;
-                background: rgba(255,255,255,0.3);
-                border-radius: 50%;
-                transform: translate(-50%, -50%) scale(0);
-                animation: ripple 0.6s ease-out forwards;
-                pointer-events: none;
-            `;
-            this.style.position = 'relative';
-            this.appendChild(ripple);
-            setTimeout(() => ripple.remove(), 700);
-        });
-    });
-}
-
-// ====== SIDEBAR ACTIVE ======
-function initSidebarActive() {
-    const path = window.location.pathname;
-    document.querySelectorAll('.nav-item').forEach(link => {
-        if (link.getAttribute('href') && path.startsWith(link.getAttribute('href'))) {
-            link.classList.add('active');
-        }
-    });
-}
-
-// ====== TOAST NOTIFICATIONS ======
-window.showToast = function(msg, type = 'info') {
-    const toast = document.createElement('div');
-    const colors = { success: '#4ade80', error: '#FF6584', info: '#6C63FF', warn: '#fbbf24' };
-    toast.style.cssText = `
-        position: fixed;
-        bottom: 24px;
-        right: 24px;
-        padding: 12px 20px;
-        background: #0f1223;
-        border: 1px solid ${colors[type] || colors.info};
-        border-radius: 12px;
-        color: ${colors[type] || colors.info};
-        font-size: 13px;
-        font-weight: 500;
-        z-index: 9999;
-        box-shadow: 0 8px 30px rgba(0,0,0,0.4);
-        animation: fadeInUp 0.4s ease;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        max-width: 320px;
+  const container = document.getElementById('particles-bg');
+  if (!container) return;
+  const colors = ['#6C63FF','#3EC6E0','#FF6584','#4ade80','#fbbf24'];
+  const count = window.innerWidth < 768 ? 15 : 30;
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    const size = Math.random() * 4 + 1;
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    const dur = Math.random() * 15 + 8;
+    const delay = Math.random() * 10;
+    const drift = (Math.random() - 0.5) * 200;
+    const maxOp = Math.random() * 0.4 + 0.1;
+    p.style.cssText = `
+      width:${size}px; height:${size}px;
+      background:${color}; left:${Math.random()*100}%;
+      --dur:${dur}s; --delay:${delay}s;
+      --drift:${drift}px; --max-op:${maxOp};
+      box-shadow: 0 0 ${size*3}px ${color};
     `;
-    toast.textContent = msg;
-    document.body.appendChild(toast);
-    setTimeout(() => {
-        toast.style.animation = 'fadeIn 0.3s ease reverse';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-};
+    container.appendChild(p);
+  }
+}
 
-// ====== KEYBOARD SHORTCUTS ======
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'n' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
-        if (window.location.pathname !== '/compose') window.location = '/compose';
-    }
-    if (e.key === 'Escape') {
-        if (window.location.pathname !== '/inbox') window.location = '/inbox';
-    }
+// ========== RIPPLE ==========
+function addRipple(e) {
+  const btn = e.currentTarget;
+  const rect = btn.getBoundingClientRect();
+  const ripple = document.createElement('div');
+  const size = Math.max(rect.width, rect.height);
+  ripple.className = 'ripple';
+  ripple.style.cssText = `
+    width:${size}px; height:${size}px;
+    left:${e.clientX-rect.left-size/2}px;
+    top:${e.clientY-rect.top-size/2}px;
+  `;
+  btn.appendChild(ripple);
+  setTimeout(() => ripple.remove(), 700);
+}
+document.querySelectorAll('.btn').forEach(btn => {
+  btn.classList.add('ripple-container');
+  btn.addEventListener('click', addRipple);
 });
 
-// ====== INIT ======
+// ========== TOAST ==========
+function toast(msg, type='info', duration=3500) {
+  const icons = { success:'fa-check-circle', error:'fa-circle-xmark', info:'fa-circle-info', warning:'fa-triangle-exclamation' };
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `<i class="fa ${icons[type]||icons.info}"></i><span>${msg}</span>`;
+  container.appendChild(el);
+  setTimeout(() => {
+    el.style.animation = 'toastOut 0.3s ease forwards';
+    setTimeout(() => el.remove(), 300);
+  }, duration);
+}
+
+// ========== SIDEBAR TOGGLE ==========
+function toggleSidebar() {
+  document.getElementById('sidebar')?.classList.toggle('open');
+}
+
+// ========== SIDEBAR CLOSE ON OUTSIDE CLICK ==========
+document.addEventListener('click', e => {
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar?.classList.contains('open') && !sidebar.contains(e.target) && !e.target.closest('.sidebar-toggle')) {
+    sidebar.classList.remove('open');
+  }
+});
+
+// ========== KEYBOARD SHORTCUTS ==========
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'n' || e.key === 'N') window.location.href = '/compose';
+  if (e.key === 'Escape') {
+    const path = window.location.pathname;
+    if (path !== '/inbox') window.location.href = '/inbox';
+  }
+});
+
+// ========== UNREAD BADGE ==========
+async function loadUnreadBadge() {
+  try {
+    const res = await fetch('/api/stats');
+    if (!res.ok) return;
+    const data = await res.json();
+    const badge = document.getElementById('unread-badge');
+    if (badge && data.unseen > 0) {
+      badge.textContent = data.unseen > 99 ? '99+' : data.unseen;
+      badge.style.display = 'inline-flex';
+    }
+  } catch {}
+}
+
+// ========== FOLDERS SIDEBAR ==========
+async function loadFolders() {
+  try {
+    const res = await fetch('/api/folders');
+    if (!res.ok) return;
+    const data = await res.json();
+    const container = document.getElementById('folders-list');
+    if (!container) return;
+    const current = new URLSearchParams(window.location.search).get('folder') || 'INBOX';
+    const skip = ['INBOX'];
+    const extras = (data.folders || []).filter(f => !skip.includes(f.toUpperCase()));
+    if (!extras.length) return;
+    container.innerHTML = extras.map(f =>
+      `<a href="/inbox?folder=${encodeURIComponent(f)}" class="nav-item ${f===current?'active':""}">
+        <i class="fa fa-folder"></i><span>${f}</span>
+      </a>`
+    ).join('');
+  } catch {}
+}
+
+// ========== COUNT UP ANIMATION ==========
+function animateCountUp(el) {
+  const target = parseInt(el.textContent) || 0;
+  const duration = 1000;
+  const start = performance.now();
+  el.textContent = '0';
+  function update(now) {
+    const progress = Math.min((now - start) / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    el.textContent = Math.floor(eased * target);
+    if (progress < 1) requestAnimationFrame(update);
+    else el.textContent = target;
+  }
+  requestAnimationFrame(update);
+}
+document.querySelectorAll('.stat-value').forEach(el => {
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => { if (e.isIntersecting) { animateCountUp(el); observer.disconnect(); } });
+  });
+  observer.observe(el);
+});
+
+// ========== INIT ==========
 document.addEventListener('DOMContentLoaded', () => {
-    initParticles();
-    initAnimations();
-    initRipple();
-    initSidebarActive();
+  initParticles();
+  loadUnreadBadge();
+  loadFolders();
+  document.querySelectorAll('.btn').forEach(btn => {
+    btn.classList.add('ripple-container');
+    btn.addEventListener('click', addRipple);
+  });
 });
