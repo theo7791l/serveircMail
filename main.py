@@ -102,15 +102,18 @@ async def register(request: Request,
     ip = auth.get_client_ip(request)
     code = db.create_pending_user(username, display_name, email, password, mail_alias)
 
-    # Send verification email via global admin config
-    sender_user = {
-        "mail_alias": db.get_setting("mail_domain", "") and f"noreply@{db.get_setting('mail_domain','')}",
-        "email": db.get_setting("global_imap_user", ""),
-    }
-    body = f"""Bonjour {display_name},\n\nVotre code de v\u00e9rification pour activer votre compte serveircMail est :\n\n    {code}\n\nCe code expire dans 15 minutes.\n\nSi vous n'avez pas demand\u00e9 cette inscription, ignorez cet email."""
-    email_client.send_mail(sender_user, to=email, subject="[serveircMail] Code de v\u00e9rification", body=body)
+    # Send verification email — From: noreply@mail_domain via Gmail SMTP
+    mail_domain = db.get_setting("mail_domain", "")
+    sender = {"mail_alias": f"noreply@{mail_domain}" if mail_domain else "", "email": ""}
+    body = (
+        f"Bonjour {display_name},\n\n"
+        f"Votre code de vérification pour activer votre compte serveircMail est :\n\n"
+        f"    {code}\n\n"
+        f"Ce code expire dans 15 minutes.\n\n"
+        f"Si vous n'avez pas demandé cette inscription, ignorez cet email."
+    )
+    email_client.send_mail(sender, to=email, subject="[serveircMail] Code de vérification", body=body)
     db.add_audit_log(None, username, "REGISTER_PENDING", ip=ip, details=f"alias={mail_alias}")
-
     return render("verify.html", request, {"email": email, "error": ""})
 
 @app.get("/verify", response_class=HTMLResponse)
@@ -317,22 +320,22 @@ async def api_folders(user=Depends(auth.require_auth)):
 @app.get("/api/mails")
 async def api_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20, user=Depends(auth.require_auth)):
     result = email_client.get_mails(user, folder=folder, page=page, per_page=per_page)
-    alias = user.get("mail_alias", "") or user.get("email", "")
+    # Filter: only show mails addressed to this user's alias
+    alias = (user.get("mail_alias") or user.get("email", "")).lower()
     if alias and result.get("mails"):
         result["mails"] = [
             m for m in result["mails"]
-            if alias.lower() in m.get("to", "").lower()
-            or alias.lower() in m.get("recipients", "").lower()
+            if alias in m.get("to", "").lower()
         ]
     return result
 
 @app.get("/api/mail/{uid}")
 async def api_mail(uid: int, folder: str = "INBOX", user=Depends(auth.require_auth)):
     mail = email_client.get_mail(user, uid=str(uid), folder=folder)
-    alias = user.get("mail_alias", "") or user.get("email", "")
+    alias = (user.get("mail_alias") or user.get("email", "")).lower()
     if alias and "to" in mail:
-        if alias.lower() not in mail["to"].lower():
-            raise HTTPException(403, detail="Ce mail ne vous est pas adress\u00e9")
+        if alias not in mail["to"].lower():
+            raise HTTPException(403, detail="Ce mail ne vous est pas adressé")
     return mail
 
 @app.post("/api/send")
@@ -340,7 +343,6 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
     if not db.user_has_perm(user["id"], "can_send_mail"):
         raise HTTPException(403)
     data = await request.json()
-    # The alias is already in user['mail_alias'] — email_client will use it as From:
     ok, err = email_client.send_mail(user, to=data.get("to"), subject=data.get("subject"), body=data.get("body"), html=data.get("html", False))
     if ok:
         db.add_audit_log(user["id"], user["username"], "SEND_MAIL", target=data.get("to"))
@@ -356,10 +358,8 @@ async def api_delete(uid: int, folder: str = "INBOX", user=Depends(auth.require_
 @app.get("/api/moderation/mails")
 async def api_moderation_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20,
     user=Depends(auth.require_perm("can_view_all_mails"))):
-    admin_user = {
-        "mail_alias": "",
-        "email": db.get_setting("global_imap_user", ""),
-    }
+    # Admin view: no alias filtering, uses global account
+    admin_user = {"mail_alias": "", "email": db.get_setting("global_imap_user", "")}
     return email_client.get_mails(admin_user, folder=folder, page=page, per_page=per_page)
 
 @app.post("/api/admin/test-mail-connection")
@@ -369,29 +369,9 @@ async def api_test_mail(user=Depends(auth.require_perm("can_change_settings"))):
     mail_user = db.get_setting("global_imap_user", "")
     mail_pass = db.get_setting("global_mail_password", "")
     if not host or not mail_user or not mail_pass:
-        return JSONResponse({"success": False, "error": "Param\u00e8tres IMAP incomplets dans les settings"})
+        return JSONResponse({"success": False, "error": "Paramètres IMAP incomplets dans les settings"})
     ok, result = test_imap_connection(host, port, mail_user, mail_pass)
     return JSONResponse({"success": ok, "mailbox": result if ok else "", "error": result if not ok else ""})
-
-@app.post("/api/admin/test-resend")
-async def api_test_resend(user=Depends(auth.require_perm("can_change_settings"))):
-    api_key = db.get_setting("resend_api_key", "")
-    if not api_key:
-        return JSONResponse({"success": False, "error": "Aucune cl\u00e9 Resend configur\u00e9e"})
-    mail_domain = db.get_setting("mail_domain", "")
-    from_addr = f"noreply@{mail_domain}" if mail_domain else db.get_setting("global_imap_user", "")
-    admin_email = db.get_setting("global_imap_user", "")
-    if not admin_email:
-        return JSONResponse({"success": False, "error": "Adresse Gmail admin non configur\u00e9e"})
-    ok, result = email_client._send_via_resend(
-        api_key=api_key,
-        from_addr=from_addr,
-        to=admin_email,
-        subject="[serveircMail] Test Resend",
-        body="Test de connexion Resend r\u00e9ussi ! L'envoi depuis votre domaine fonctionne correctement.",
-        html=False
-    )
-    return JSONResponse({"success": ok, "id": result if ok else "", "error": result if not ok else ""})
 
 @app.get("/api/stats")
 async def api_stats(user=Depends(auth.require_auth)):
