@@ -6,12 +6,11 @@ from email.mime.text import MIMEText
 from email.header import decode_header
 from email.utils import parseaddr
 import os
+import urllib.request
+import urllib.error
+import json
 
 def _get_mail_config(user: dict) -> dict:
-    """
-    Resolve mail config for a user.
-    Priority: user-level > global DB settings > env vars
-    """
     from database import get_setting
 
     imap_host = user.get('imap_host') or get_setting('global_imap_host') or os.getenv('IMAP_HOST', '')
@@ -20,14 +19,19 @@ def _get_mail_config(user: dict) -> dict:
     smtp_port = int(user.get('smtp_port') or get_setting('global_smtp_port', '465') or 465)
     smtp_enc  = get_setting('global_smtp_encryption', 'SSL')
 
-    # Username: user-level mail_username > global_imap_user > user email
-    mail_user = (
-        user.get('mail_username')
-        or get_setting('global_imap_user')
+    # IMAP login = always global admin account (one Gmail inbox)
+    mail_user = get_setting('global_imap_user') or os.getenv('IMAP_USER', '')
+    mail_pass = get_setting('global_mail_password') or os.getenv('EMAIL_PASSWORD', '')
+
+    # Alias = the address shown as From / used to filter inbox
+    alias = (
+        user.get('mail_alias')
+        or user.get('mail_username')
         or user.get('email', '')
     )
-    # Password: user-level > global
-    mail_pass = user.get('mail_password') or get_setting('global_mail_password') or os.getenv('EMAIL_PASSWORD', '')
+
+    # Resend API key for outgoing
+    resend_key = get_setting('resend_api_key', '')
 
     return {
         'imap_host': imap_host,
@@ -37,6 +41,8 @@ def _get_mail_config(user: dict) -> dict:
         'smtp_enc':  smtp_enc,
         'mail_user': mail_user,
         'mail_pass': mail_pass,
+        'alias':     alias,
+        'resend_key': resend_key,
     }
 
 def get_imap_connection(user: dict):
@@ -75,7 +81,7 @@ def get_mails(user: dict, folder: str = 'INBOX', page: int = 1, per_page: int = 
         mails = []
         for uid in page_uids:
             try:
-                status, msg_data = mail.fetch(uid, '(FLAGS BODY[HEADER.FIELDS (FROM SUBJECT DATE)])')
+                status, msg_data = mail.fetch(uid, '(FLAGS BODY[HEADER.FIELDS (FROM TO SUBJECT DATE)])')
                 raw = msg_data[0][1]
                 msg = email_lib.message_from_bytes(raw)
                 flags = msg_data[0][0].decode() if msg_data[0][0] else ''
@@ -99,6 +105,8 @@ def get_mails(user: dict, folder: str = 'INBOX', page: int = 1, per_page: int = 
                 mails.append({
                     'uid': uid.decode(),
                     'from': from_decoded or from_raw,
+                    'to': msg.get('To', ''),
+                    'recipients': msg.get('To', '') + msg.get('CC', '') + msg.get('Delivered-To', ''),
                     'subject': subject or '(Sans objet)',
                     'date': msg.get('Date', ''),
                     'seen': seen,
@@ -168,12 +176,51 @@ def get_mail(user: dict, uid: str, folder: str = 'INBOX'):
     except Exception as e:
         return {'error': str(e)}
 
-def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False):
+def _send_via_resend(api_key: str, from_addr: str, to: str, subject: str, body: str, html: bool = False) -> tuple:
+    """Send email via Resend API — supports any From: alias on verified domain."""
+    payload = {
+        'from': from_addr,
+        'to': [to],
+        'subject': subject,
+    }
+    if html:
+        payload['html'] = body
+    else:
+        payload['text'] = body
+
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(
+        'https://api.resend.com/emails',
+        data=data,
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+        },
+        method='POST'
+    )
     try:
-        cfg = _get_mail_config(user)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            result = json.loads(resp.read().decode())
+            return True, result.get('id', 'sent')
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode(errors='replace')
+        return False, f'Resend HTTP {e.code}: {err_body}'
+    except Exception as e:
+        return False, str(e)
+
+def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False):
+    cfg = _get_mail_config(user)
+    from_addr = cfg['alias'] or cfg['mail_user']
+
+    # Prefer Resend if API key configured (supports any @domain alias)
+    if cfg.get('resend_key'):
+        return _send_via_resend(cfg['resend_key'], from_addr, to, subject, body, html)
+
+    # Fallback: SMTP (From = global mail_user, alias in header only)
+    try:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
-        msg['From'] = cfg['mail_user']
+        msg['From'] = from_addr
         msg['To'] = to
         if html:
             msg.attach(MIMEText(body, 'html', 'utf-8'))

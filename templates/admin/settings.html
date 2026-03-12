@@ -62,7 +62,7 @@
     </div>
   </div>
 
-  <!-- Domaine mail -->
+  <!-- Domaine des alias mail -->
   <div class="card">
     <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
       <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#f472b6,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,0.3);flex-shrink:0;">
@@ -81,38 +81,73 @@
       </div>
       <div style="background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.25);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:flex-start;">
         <i class="fa fa-circle-info" style="color:#a78bfa;margin-top:1px;"></i>
-        <span>Ce domaine doit être configuré avec ImprovMX (alias <code>*</code>) pour que les mails soient redirigés vers ta boîte Zoho.</span>
+        <span>Ce domaine doit être configuré avec ImprovMX (alias <code>*</code>) pour que les mails soient redirigés vers ta boîte Gmail.</span>
       </div>
     </div>
   </div>
 
-  <!-- Serveur Mail Global -->
+  <!-- Resend (envoi) -->
+  <div class="card">
+    <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
+      <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#ef4444);display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,0.3);flex-shrink:0;">
+        <i class="fa fa-paper-plane"></i>
+      </div>
+      <div>
+        <div style="font-size:15px;font-weight:700;color:var(--text);">Resend <span style="font-size:11px;background:rgba(74,222,128,0.15);color:var(--accent3);padding:2px 8px;border-radius:20px;margin-left:6px;">Envoi alias</span></div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Permet d'envoyer depuis n'importe quel <code>@{{ settings.get('mail_domain','ton-domaine.com') }}</code></div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="form-group">
+        <label class="form-label"><i class="fa fa-key"></i> Resend API Key</label>
+        <div style="position:relative;display:flex;align-items:center;">
+          <input class="form-input" style="padding-right:48px;font-family:monospace;font-size:12px;" type="password" name="resend_api_key" id="resendKey" value="{{ settings.get('resend_api_key','') }}" placeholder="re_xxxxxxxxxxxxxxxxxxxx" />
+          <button type="button" onclick="toggleResendKey()" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;">
+            <i class="fa fa-eye" id="resendKeyEye"></i>
+          </button>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Crée ton compte sur <a href="https://resend.com" target="_blank" style="color:var(--primary);">resend.com</a>, vérifie le domaine <strong>{{ settings.get('mail_domain','youtube.serveirc.com') }}</strong> puis génère une API Key.</div>
+      </div>
+      <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:flex-start;">
+        <i class="fa fa-triangle-exclamation" style="color:#f59e0b;margin-top:1px;"></i>
+        <span>Si cette clé est remplie, <strong>tous les mails sont envoyés via Resend</strong> depuis l'alias de chaque utilisateur (ex: <code>jean@{{ settings.get('mail_domain','youtube.serveirc.com') }}</code>). Sinon, fallback SMTP Gmail.</span>
+      </div>
+      <div style="margin-top:12px;">
+        <button type="button" class="btn btn-ghost" onclick="testResend()" id="resendTestBtn">
+          <i class="fa fa-paper-plane"></i> Tester Resend
+        </button>
+        <div id="resendTestResult" style="display:none;margin-top:10px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm);"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Serveur IMAP (réception) -->
   <div class="card">
     <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
       <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#7df3ff);display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,0.3);flex-shrink:0;">
         <i class="fa fa-server"></i>
       </div>
       <div>
-        <div style="font-size:15px;font-weight:700;color:var(--text);">Serveur IMAP / SMTP</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Configuration globale pour tous les utilisateurs</div>
+        <div style="font-size:15px;font-weight:700;color:var(--text);">Serveur IMAP <span style="font-size:11px;background:rgba(62,198,224,0.15);color:var(--accent);padding:2px 8px;border-radius:20px;margin-left:6px;">Réception</span></div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Compte Gmail global utilisé pour lire les mails</div>
       </div>
     </div>
     <div class="card-body">
       <div class="grid-2">
         <div class="form-group">
           <label class="form-label"><i class="fa fa-download" style="color:var(--accent)"></i> IMAP Host</label>
-          <input class="form-input" name="global_imap_host" value="{{ settings.get('global_imap_host','') }}" placeholder="imap.zoho.eu" />
+          <input class="form-input" name="global_imap_host" value="{{ settings.get('global_imap_host','') }}" placeholder="imap.gmail.com" />
         </div>
         <div class="form-group">
           <label class="form-label">IMAP Port</label>
           <input class="form-input" type="number" name="global_imap_port" value="{{ settings.get('global_imap_port','993') }}" />
         </div>
         <div class="form-group">
-          <label class="form-label"><i class="fa fa-upload" style="color:var(--primary)"></i> SMTP Host</label>
-          <input class="form-input" name="global_smtp_host" value="{{ settings.get('global_smtp_host','') }}" placeholder="smtp.zoho.eu" />
+          <label class="form-label"><i class="fa fa-upload" style="color:var(--primary)"></i> SMTP Host (fallback)</label>
+          <input class="form-input" name="global_smtp_host" value="{{ settings.get('global_smtp_host','') }}" placeholder="smtp.gmail.com" />
         </div>
         <div class="form-group">
-          <label class="form-label">SMTP Port</label>
+          <label class="form-label">SMTP Port (fallback)</label>
           <input class="form-input" type="number" name="global_smtp_port" value="{{ settings.get('global_smtp_port','465') }}" />
         </div>
       </div>
@@ -124,26 +159,22 @@
         </select>
       </div>
       <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:4px;">
-        <div style="font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px;">Authentification globale</div>
+        <div style="font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px;">Compte Gmail global</div>
         <div class="form-group">
-          <label class="form-label"><i class="fa fa-at"></i> Nom d'utilisateur IMAP (adresse Zoho)</label>
-          <input class="form-input" name="global_imap_user" value="{{ settings.get('global_imap_user','') }}" placeholder="theo7791l@zohomail.eu" />
-          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Mettre le compte Zoho réel, pas l'alias (ex: <strong>theo7791l@zohomail.eu</strong>)</div>
+          <label class="form-label"><i class="fa fa-at"></i> Adresse Gmail</label>
+          <input class="form-input" name="global_imap_user" value="{{ settings.get('global_imap_user','') }}" placeholder="toncompte@gmail.com" />
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Le compte Gmail qui reçoit tous les mails via ImprovMX</div>
         </div>
         <div class="form-group">
-          <label class="form-label"><i class="fa fa-key"></i> Mot de passe mail global</label>
+          <label class="form-label"><i class="fa fa-key"></i> App Password Gmail</label>
           <div style="position:relative;display:flex;align-items:center;">
-            <input class="form-input" style="padding-right:48px;" type="password" name="global_mail_password" id="globalPwd" value="{{ settings.get('global_mail_password','') }}" placeholder="Mot de passe Zoho Mail" />
+            <input class="form-input" style="padding-right:48px;" type="password" name="global_mail_password" id="globalPwd" value="{{ settings.get('global_mail_password','') }}" placeholder="App Password 16 caractères" />
             <button type="button" onclick="toggleGlobalPwd()" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;">
               <i class="fa fa-eye" id="globalPwdEye"></i>
             </button>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Ton mot de passe Zoho Mail. Pour Gmail : utilise un App Password.</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Génère-le sur <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--primary);">myaccount.google.com/apppasswords</a></div>
         </div>
-      </div>
-      <div style="background:rgba(62,198,224,0.06);border:1px solid rgba(62,198,224,0.2);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:flex-start;">
-        <i class="fa fa-circle-info" style="color:var(--accent);margin-top:1px;"></i>
-        <span>Ces valeurs sont utilisées pour tous les comptes qui n'ont pas leur propre configuration mail dans leur profil.</span>
       </div>
     </div>
   </div>
@@ -156,7 +187,7 @@
       </div>
       <div>
         <div style="font-size:15px;font-weight:700;color:var(--text);">Test de connexion</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Vérifier que les paramètres IMAP/SMTP fonctionnent</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Vérifier que les paramètres IMAP fonctionnent</div>
       </div>
     </div>
     <div class="card-body">
@@ -178,6 +209,11 @@
 <script>
 function toggleGlobalPwd() {
   const i = document.getElementById('globalPwd'), e = document.getElementById('globalPwdEye');
+  i.type = i.type === 'password' ? 'text' : 'password';
+  e.className = i.type === 'password' ? 'fa fa-eye' : 'fa fa-eye-slash';
+}
+function toggleResendKey() {
+  const i = document.getElementById('resendKey'), e = document.getElementById('resendKeyEye');
   i.type = i.type === 'password' ? 'text' : 'password';
   e.className = i.type === 'password' ? 'fa fa-eye' : 'fa fa-eye-slash';
 }
@@ -208,6 +244,34 @@ async function testConnection() {
   }
   btn.disabled = false;
   btn.innerHTML = '<i class="fa fa-plug"></i> Tester la connexion IMAP';
+}
+async function testResend() {
+  const btn = document.getElementById('resendTestBtn');
+  const res = document.getElementById('resendTestResult');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Test en cours...';
+  res.style.display = 'none';
+  try {
+    const r = await fetch('/api/admin/test-resend', {method:'POST'});
+    const d = await r.json();
+    res.style.display = 'block';
+    if (d.success) {
+      res.style.background = 'rgba(74,222,128,0.1)';
+      res.style.border = '1px solid rgba(74,222,128,0.3)';
+      res.style.color = 'var(--accent3)';
+      res.innerHTML = '<i class="fa fa-check-circle"></i> Resend opérationnel ! ID : ' + (d.id || '');
+    } else {
+      res.style.background = 'rgba(239,68,68,0.1)';
+      res.style.border = '1px solid rgba(239,68,68,0.3)';
+      res.style.color = 'var(--accent2)';
+      res.innerHTML = '<i class="fa fa-circle-xmark"></i> Erreur : ' + (d.error || 'Clé invalide ou domaine non vérifié');
+    }
+  } catch(e) {
+    res.style.display = 'block';
+    res.innerHTML = '<i class="fa fa-circle-xmark"></i> Erreur réseau';
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fa fa-paper-plane"></i> Tester Resend';
 }
 </script>
 {% endblock %}
