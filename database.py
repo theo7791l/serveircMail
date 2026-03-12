@@ -45,72 +45,72 @@ def init_db():
     conn = get_conn()
     c = conn.cursor()
 
-    c.execute('''CREATE TABLE IF NOT EXISTS roles (
+    c.execute("""CREATE TABLE IF NOT EXISTS roles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL,
         display_name TEXT NOT NULL,
-        color TEXT DEFAULT "#6C63FF",
-        description TEXT DEFAULT "",
+        color TEXT DEFAULT '#6C63FF',
+        description TEXT DEFAULT '',
         is_system INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT (datetime("now"))
-    )''')
+        created_at TEXT DEFAULT (datetime('now'))
+    )""")
 
-    c.execute('''CREATE TABLE IF NOT EXISTS permissions (
+    c.execute("""CREATE TABLE IF NOT EXISTS permissions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         key TEXT UNIQUE NOT NULL,
         label TEXT NOT NULL,
-        description TEXT DEFAULT "",
-        category TEXT DEFAULT "general"
-    )''')
+        description TEXT DEFAULT '',
+        category TEXT DEFAULT 'general'
+    )""")
 
-    c.execute('''CREATE TABLE IF NOT EXISTS role_permissions (
+    c.execute("""CREATE TABLE IF NOT EXISTS role_permissions (
         role_id INTEGER,
         permission_key TEXT,
         PRIMARY KEY (role_id, permission_key)
-    )''')
+    )""")
 
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         display_name TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         role_id INTEGER DEFAULT 4,
-        imap_host TEXT DEFAULT "",
+        imap_host TEXT DEFAULT '',
         imap_port INTEGER DEFAULT 993,
-        smtp_host TEXT DEFAULT "",
+        smtp_host TEXT DEFAULT '',
         smtp_port INTEGER DEFAULT 587,
-        mail_password TEXT DEFAULT "",
+        mail_password TEXT DEFAULT '',
         is_active INTEGER DEFAULT 1,
         is_banned INTEGER DEFAULT 0,
-        avatar_color TEXT DEFAULT "#6C63FF",
-        last_login TEXT DEFAULT "",
-        created_at TEXT DEFAULT (datetime("now"))
-    )''')
+        avatar_color TEXT DEFAULT '#6C63FF',
+        last_login TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
+    )""")
 
-    c.execute('''CREATE TABLE IF NOT EXISTS sessions (
+    c.execute("""CREATE TABLE IF NOT EXISTS sessions (
         token TEXT PRIMARY KEY,
         user_id INTEGER NOT NULL,
-        created_at TEXT DEFAULT (datetime("now")),
+        created_at TEXT DEFAULT (datetime('now')),
         expires_at TEXT NOT NULL
-    )''')
+    )""")
 
-    c.execute('''CREATE TABLE IF NOT EXISTS audit_logs (
+    c.execute("""CREATE TABLE IF NOT EXISTS audit_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
-        username TEXT DEFAULT "system",
+        username TEXT DEFAULT 'system',
         action TEXT NOT NULL,
-        target TEXT DEFAULT "",
-        details TEXT DEFAULT "",
-        ip TEXT DEFAULT "",
-        created_at TEXT DEFAULT (datetime("now"))
-    )''')
+        target TEXT DEFAULT '',
+        details TEXT DEFAULT '',
+        ip TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
+    )""")
 
-    c.execute('''CREATE TABLE IF NOT EXISTS system_settings (
+    c.execute("""CREATE TABLE IF NOT EXISTS system_settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
-        updated_at TEXT DEFAULT (datetime("now"))
-    )''')
+        updated_at TEXT DEFAULT (datetime('now'))
+    )""")
 
     # Insert default roles
     default_roles = [
