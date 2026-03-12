@@ -41,6 +41,10 @@ def get_conn():
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
+def _hash_password(password: str) -> str:
+    """Hash password safely, truncating to 72 bytes for bcrypt compatibility."""
+    return pwd_context.hash(password.encode('utf-8')[:72])
+
 def init_db():
     conn = get_conn()
     c = conn.cursor()
@@ -176,7 +180,7 @@ def _create_super_admin():
     exists = c.execute("SELECT id FROM users WHERE username=?", (sa_user,)).fetchone()
     if not exists:
         role = c.execute("SELECT id FROM roles WHERE name='SUPER_ADMIN'").fetchone()
-        hashed = pwd_context.hash(sa_pass)
+        hashed = _hash_password(sa_pass)
         c.execute(
             "INSERT INTO users (username, display_name, email, password_hash, role_id, avatar_color) VALUES (?,?,?,?,?,?)",
             (sa_user, "Super Admin", sa_email, hashed, role["id"], "#FF6584")
@@ -224,7 +228,7 @@ def get_all_users(search: str = "", page: int = 1, per_page: int = 20):
 
 def create_user(username, display_name, email, password, role_id=4, imap_host="", imap_port=993, smtp_host="", smtp_port=587, mail_password=""):
     conn = get_conn()
-    hashed = pwd_context.hash(password)
+    hashed = _hash_password(password)
     colors = ["#6C63FF", "#3EC6E0", "#FF6584", "#4ade80", "#fbbf24", "#f472b6"]
     import random
     color = random.choice(colors)
@@ -243,7 +247,7 @@ def create_user(username, display_name, email, password, role_id=4, imap_host=""
 def update_user(user_id, **kwargs):
     conn = get_conn()
     if "password" in kwargs:
-        kwargs["password_hash"] = pwd_context.hash(kwargs.pop("password"))
+        kwargs["password_hash"] = _hash_password(kwargs.pop("password"))
     fields = ", ".join(f"{k}=?" for k in kwargs)
     values = list(kwargs.values()) + [user_id]
     conn.execute(f"UPDATE users SET {fields} WHERE id=?", values)
@@ -258,7 +262,7 @@ def delete_user(user_id: int):
     conn.close()
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return pwd_context.verify(plain.encode('utf-8')[:72], hashed)
 
 # ========== SESSIONS ==========
 
