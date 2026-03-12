@@ -42,7 +42,6 @@ def get_conn():
     return conn
 
 def _hash_password(password: str) -> str:
-    """Hash password safely, truncating to 72 bytes for bcrypt compatibility."""
     return pwd_context.hash(password.encode('utf-8')[:72])
 
 def init_db():
@@ -85,6 +84,7 @@ def init_db():
         smtp_host TEXT DEFAULT '',
         smtp_port INTEGER DEFAULT 587,
         mail_password TEXT DEFAULT '',
+        mail_username TEXT DEFAULT '',
         is_active INTEGER DEFAULT 1,
         is_banned INTEGER DEFAULT 0,
         avatar_color TEXT DEFAULT '#6C63FF',
@@ -115,6 +115,13 @@ def init_db():
         value TEXT NOT NULL,
         updated_at TEXT DEFAULT (datetime('now'))
     )""")
+
+    # Migrate: add mail_username column if missing
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN mail_username TEXT DEFAULT ''")
+        conn.commit()
+    except:
+        pass
 
     # Insert default roles
     default_roles = [
@@ -160,15 +167,16 @@ def init_db():
         ("global_imap_host", os.getenv("IMAP_HOST", "")),
         ("global_imap_port", os.getenv("IMAP_PORT", "993")),
         ("global_smtp_host", os.getenv("SMTP_HOST", "")),
-        ("global_smtp_port", os.getenv("SMTP_PORT", "587")),
+        ("global_smtp_port", os.getenv("SMTP_PORT", "465")),
+        ("global_smtp_encryption", "SSL"),
+        ("global_imap_user", os.getenv("IMAP_USER", "")),
+        ("global_mail_password", os.getenv("EMAIL_PASSWORD", "")),
     ]
     for k, v in defaults:
         c.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES (?,?)", (k, v))
 
     conn.commit()
     conn.close()
-
-    # Create super admin if not exists
     _create_super_admin()
 
 def _create_super_admin():
@@ -226,7 +234,7 @@ def get_all_users(search: str = "", page: int = 1, per_page: int = 20):
     conn.close()
     return [dict(u) for u in users], total
 
-def create_user(username, display_name, email, password, role_id=4, imap_host="", imap_port=993, smtp_host="", smtp_port=587, mail_password=""):
+def create_user(username, display_name, email, password, role_id=4, imap_host="", imap_port=993, smtp_host="", smtp_port=587, mail_password="", mail_username=""):
     conn = get_conn()
     hashed = _hash_password(password)
     colors = ["#6C63FF", "#3EC6E0", "#FF6584", "#4ade80", "#fbbf24", "#f472b6"]
@@ -234,8 +242,8 @@ def create_user(username, display_name, email, password, role_id=4, imap_host=""
     color = random.choice(colors)
     try:
         conn.execute(
-            "INSERT INTO users (username, display_name, email, password_hash, role_id, imap_host, imap_port, smtp_host, smtp_port, mail_password, avatar_color) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (username, display_name, email, hashed, role_id, imap_host, imap_port, smtp_host, smtp_port, mail_password, color)
+            "INSERT INTO users (username, display_name, email, password_hash, role_id, imap_host, imap_port, smtp_host, smtp_port, mail_password, mail_username, avatar_color) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (username, display_name, email, hashed, role_id, imap_host, imap_port, smtp_host, smtp_port, mail_password, mail_username, color)
         )
         conn.commit()
         conn.close()

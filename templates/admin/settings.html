@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block page_title %}<i class="fa fa-sliders" style="color:var(--primary)"></i> Paramètres{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
@@ -8,19 +9,23 @@
 </div>
 
 {% if request.query_params.get('success') %}
-<div class="alert alert-success mb-4"><i class="fa fa-check-circle"></i> Paramètres sauvegardés avec succès !</div>
+<div style="background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.3);color:var(--accent3);padding:12px 18px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px;display:flex;align-items:center;gap:8px;">
+  <i class="fa fa-check-circle"></i> Paramètres sauvegardés avec succès !
+</div>
 {% endif %}
 
 <form method="post" action="/admin/settings">
-<div class="settings-grid">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:20px;">
 
   <!-- Général -->
   <div class="card">
-    <div class="settings-section-header">
-      <span class="settings-section-icon" style="background:linear-gradient(135deg,var(--primary),var(--accent))"><i class="fa fa-gear"></i></span>
+    <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
+      <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--primary),var(--accent));display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,0.3);flex-shrink:0;">
+        <i class="fa fa-gear"></i>
+      </div>
       <div>
-        <h3 class="settings-section-title">Général</h3>
-        <p class="settings-section-sub">Paramètres de base du site</p>
+        <div style="font-size:15px;font-weight:700;color:var(--text);">Général</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Paramètres de base du site</div>
       </div>
     </div>
     <div class="card-body">
@@ -32,10 +37,10 @@
         <label class="form-label">Nombre max d'utilisateurs</label>
         <input class="form-input" type="number" name="max_users" value="{{ settings.get('max_users','100') }}" />
       </div>
-      <div class="settings-toggle-row">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-top:1px solid rgba(255,255,255,0.05);">
         <div>
-          <div style="font-size:14px;font-weight:600;color:var(--text)">Inscriptions ouvertes</div>
-          <div style="font-size:12px;color:var(--text-muted)">Permettre aux nouveaux users de s'inscrire</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text);">Inscriptions ouvertes</div>
+          <div style="font-size:12px;color:var(--text-muted);">Permettre aux nouveaux users de s'inscrire</div>
         </div>
         <label class="toggle">
           <input type="hidden" name="allow_registration" value="0">
@@ -43,10 +48,10 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <div class="settings-toggle-row">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-top:1px solid rgba(255,255,255,0.05);">
         <div>
-          <div style="font-size:14px;font-weight:600;color:var(--accent2)"><i class="fa fa-triangle-exclamation"></i> Mode maintenance</div>
-          <div style="font-size:12px;color:var(--text-muted)">Bloquer l'accès au site pour les users</div>
+          <div style="font-size:14px;font-weight:600;color:var(--accent2);"><i class="fa fa-triangle-exclamation"></i> Mode maintenance</div>
+          <div style="font-size:12px;color:var(--text-muted);">Bloquer l'accès au site pour les users</div>
         </div>
         <label class="toggle">
           <input type="hidden" name="maintenance_mode" value="0">
@@ -57,58 +62,128 @@
     </div>
   </div>
 
-  <!-- IMAP/SMTP Global -->
+  <!-- Serveur Mail Global -->
   <div class="card">
-    <div class="settings-section-header">
-      <span class="settings-section-icon" style="background:linear-gradient(135deg,var(--accent),#7df3ff)"><i class="fa fa-envelope"></i></span>
+    <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
+      <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#7df3ff);display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,0.3);flex-shrink:0;">
+        <i class="fa fa-server"></i>
+      </div>
       <div>
-        <h3 class="settings-section-title">Serveur Mail Global</h3>
-        <p class="settings-section-sub">IMAP/SMTP par défaut pour tous les users</p>
+        <div style="font-size:15px;font-weight:700;color:var(--text);">Serveur IMAP / SMTP</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Configuration globale pour tous les utilisateurs</div>
       </div>
     </div>
     <div class="card-body">
       <div class="grid-2">
         <div class="form-group">
-          <label class="form-label">IMAP Host</label>
-          <input class="form-input" name="global_imap_host" value="{{ settings.get('global_imap_host','') }}" placeholder="imap.example.com" />
+          <label class="form-label"><i class="fa fa-download" style="color:var(--accent)"></i> IMAP Host</label>
+          <input class="form-input" name="global_imap_host" value="{{ settings.get('global_imap_host','') }}" placeholder="imap.zoho.eu" />
         </div>
         <div class="form-group">
           <label class="form-label">IMAP Port</label>
           <input class="form-input" type="number" name="global_imap_port" value="{{ settings.get('global_imap_port','993') }}" />
         </div>
         <div class="form-group">
-          <label class="form-label">SMTP Host</label>
-          <input class="form-input" name="global_smtp_host" value="{{ settings.get('global_smtp_host','') }}" placeholder="smtp.example.com" />
+          <label class="form-label"><i class="fa fa-upload" style="color:var(--primary)"></i> SMTP Host</label>
+          <input class="form-input" name="global_smtp_host" value="{{ settings.get('global_smtp_host','') }}" placeholder="smtp.zoho.eu" />
         </div>
         <div class="form-group">
           <label class="form-label">SMTP Port</label>
-          <input class="form-input" type="number" name="global_smtp_port" value="{{ settings.get('global_smtp_port','587') }}" />
+          <input class="form-input" type="number" name="global_smtp_port" value="{{ settings.get('global_smtp_port','465') }}" />
         </div>
       </div>
-      <div class="settings-info-box">
-        <i class="fa fa-circle-info" style="color:var(--accent)"></i>
-        Ces valeurs sont utilisées pour les nouveaux comptes et comme fallback si un user n'a pas configuré son propre serveur mail.
+      <div class="form-group">
+        <label class="form-label">Chiffrement SMTP</label>
+        <select class="form-select" name="global_smtp_encryption">
+          <option value="SSL" {{ 'selected' if settings.get('global_smtp_encryption','SSL') == 'SSL' }}>SSL (port 465)</option>
+          <option value="TLS" {{ 'selected' if settings.get('global_smtp_encryption','SSL') == 'TLS' }}>STARTTLS (port 587)</option>
+        </select>
       </div>
+      <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:4px;">
+        <div style="font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px;">Authentification globale</div>
+        <div class="form-group">
+          <label class="form-label"><i class="fa fa-at"></i> Adresse mail / Nom d'utilisateur IMAP</label>
+          <input class="form-input" name="global_imap_user" value="{{ settings.get('global_imap_user','') }}" placeholder="contact@youtube.serveirc.com" />
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Utiliser l'adresse mail complète (ex: theo7791l@zohomail.eu)</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label"><i class="fa fa-key"></i> Mot de passe mail global</label>
+          <div style="position:relative;display:flex;align-items:center;">
+            <input class="form-input" style="padding-right:48px;" type="password" name="global_mail_password" id="globalPwd" value="{{ settings.get('global_mail_password','') }}" placeholder="Mot de passe de la boîte mail" />
+            <button type="button" onclick="toggleGlobalPwd()" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;">
+              <i class="fa fa-eye" id="globalPwdEye"></i>
+            </button>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Pour Zoho : ton mot de passe Zoho Mail. Pour Gmail : utilise un App Password.</div>
+        </div>
+      </div>
+      <div style="background:rgba(62,198,224,0.06);border:1px solid rgba(62,198,224,0.2);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:flex-start;">
+        <i class="fa fa-circle-info" style="color:var(--accent);margin-top:1px;"></i>
+        <span>Ces valeurs sont utilisées pour tous les comptes qui n'ont pas leur propre configuration mail dans leur profil.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Test de connexion -->
+  <div class="card">
+    <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
+      <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--accent3),#a7f3d0);display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,0.3);flex-shrink:0;">
+        <i class="fa fa-plug"></i>
+      </div>
+      <div>
+        <div style="font-size:15px;font-weight:700;color:var(--text);">Test de connexion</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Vérifier que les paramètres IMAP/SMTP fonctionnent</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Sauvegarde d'abord les paramètres, puis clique sur tester pour vérifier la connexion IMAP.</p>
+      <button type="button" class="btn btn-ghost" onclick="testConnection()" id="testBtn">
+        <i class="fa fa-plug"></i> Tester la connexion IMAP
+      </button>
+      <div id="testResult" style="display:none;margin-top:12px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm);"></div>
     </div>
   </div>
 
 </div>
 
-<div style="display:flex;justify-content:flex-end;margin-top:24px">
+<div style="display:flex;justify-content:flex-end;margin-top:24px;">
   <button type="submit" class="btn btn-primary btn-lg"><i class="fa fa-floppy-disk"></i> Sauvegarder les paramètres</button>
 </div>
 </form>
 
-<style>
-.settings-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(400px,1fr)); gap:20px; }
-.settings-section-header { padding:20px 24px 16px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.05); }
-.settings-section-icon { width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px;color:white;flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,0.3); }
-.settings-section-title { font-size:15px;font-weight:700;color:var(--text); }
-.settings-section-sub { font-size:12px;color:var(--text-muted);margin-top:2px; }
-.settings-toggle-row { display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-top:1px solid rgba(255,255,255,0.05); }
-.settings-info-box { background:rgba(62,198,224,0.06);border:1px solid rgba(62,198,224,0.2);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:flex-start;margin-top:8px; }
-.alert { padding:14px 18px;border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:10px; }
-.alert-success { background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:var(--accent3); }
-@media(max-width:700px){.settings-grid{grid-template-columns:1fr;}}
-</style>
+<script>
+function toggleGlobalPwd() {
+  const i = document.getElementById('globalPwd'), e = document.getElementById('globalPwdEye');
+  i.type = i.type === 'password' ? 'text' : 'password';
+  e.className = i.type === 'password' ? 'fa fa-eye' : 'fa fa-eye-slash';
+}
+async function testConnection() {
+  const btn = document.getElementById('testBtn');
+  const res = document.getElementById('testResult');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Test en cours...';
+  res.style.display = 'none';
+  try {
+    const r = await fetch('/api/admin/test-mail-connection', {method:'POST'});
+    const d = await r.json();
+    res.style.display = 'block';
+    if (d.success) {
+      res.style.background = 'rgba(74,222,128,0.1)';
+      res.style.border = '1px solid rgba(74,222,128,0.3)';
+      res.style.color = 'var(--accent3)';
+      res.innerHTML = '<i class="fa fa-check-circle"></i> Connexion IMAP réussie ! Boite : ' + (d.mailbox || '');
+    } else {
+      res.style.background = 'rgba(239,68,68,0.1)';
+      res.style.border = '1px solid rgba(239,68,68,0.3)';
+      res.style.color = 'var(--accent2)';
+      res.innerHTML = '<i class="fa fa-circle-xmark"></i> Erreur : ' + (d.error || 'Connexion impossible');
+    }
+  } catch(e) {
+    res.style.display = 'block';
+    res.innerHTML = '<i class="fa fa-circle-xmark"></i> Erreur réseau';
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fa fa-plug"></i> Tester la connexion IMAP';
+}
+</script>
 {% endblock %}
