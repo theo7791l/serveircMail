@@ -10,7 +10,7 @@ import os
 def _get_mail_config(user: dict) -> dict:
     from database import get_setting
 
-    # IMAP (reception)
+    # IMAP (reception via Gmail + ImprovMX forward)
     imap_host = user.get('imap_host') or get_setting('global_imap_host') or os.getenv('IMAP_HOST', 'imap.gmail.com')
     imap_port = int(user.get('imap_port') or get_setting('global_imap_port', '993') or 993)
     imap_user = get_setting('global_imap_user') or os.getenv('IMAP_USER', '')
@@ -22,7 +22,7 @@ def _get_mail_config(user: dict) -> dict:
     smtp_user = get_setting('global_smtp_user') or os.getenv('SMTP_USER', 'api')
     smtp_pass = get_setting('global_smtp_password') or os.getenv('SMTP_PASSWORD', '')
 
-    # Alias = adresse From affichee au destinataire
+    # Alias = adresse From affichee au destinataire (ex: jean@youtube.serveirc.com)
     alias = (
         user.get('mail_alias')
         or user.get('mail_username')
@@ -165,10 +165,10 @@ def get_mail(user: dict, uid: str, folder: str = 'INBOX'):
 
 def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False):
     """
-    Envoi via Mailtrap SMTP (live.smtp.mailtrap.io).
-    - Login SMTP : SMTP_USER ("api") + SMTP_PASSWORD (cle API Mailtrap)
+    Envoi via Mailtrap SMTP (live.smtp.mailtrap.io, port 587, STARTTLS).
+    - Login : SMTP_USER="api" + SMTP_PASSWORD=cle_api_mailtrap
     - From: = alias de l'utilisateur (ex: jean@youtube.serveirc.com)
-    Le destinataire voit directement l'adresse alias sans "via".
+    - Le domaine serveirc.com doit etre verifie dans Mailtrap > Email API/SMTP > Domains
     """
     cfg = _get_mail_config(user)
     from_addr = cfg['alias'] or cfg['imap_user']
@@ -185,13 +185,12 @@ def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False):
         else:
             msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
-        # Mailtrap utilise STARTTLS sur le port 587
         server = smtplib.SMTP(cfg['smtp_host'], cfg['smtp_port'])
         server.ehlo()
         server.starttls()
         server.ehlo()
         server.login(cfg['smtp_user'], cfg['smtp_pass'])
-        # envelope sender = alias (Mailtrap l'autorise si le domaine est verifie)
+        # envelope sender = alias (autorise car domaine verifie dans Mailtrap)
         server.sendmail(from_addr, to, msg.as_string())
         server.quit()
         return True, None

@@ -133,7 +133,7 @@ def init_db():
         updated_at TEXT DEFAULT (datetime('now'))
     )""")
 
-    # Migrations
+    # Migrations colonnes users
     for col, typedef in [
         ("mail_username", "TEXT DEFAULT ''"),
         ("mail_alias", "TEXT DEFAULT ''"),
@@ -159,7 +159,7 @@ def init_db():
         ("can_manage_users", "Gérer les utilisateurs", "Créer, modifier, supprimer des comptes", "admin"),
         ("can_manage_roles", "Gérer les rôles", "Créer et modifier des rôles custom", "admin"),
         ("can_view_logs", "Voir les logs", "Accès aux logs d'audit", "admin"),
-        ("can_suspend_users", "Suspendre des utilisateurs", "Mettre en pause un compte", "moderation"),
+        ("can_suspend_users", "Suspendre des utilisateurs", "Mettre en pause un compte", "admin"),
         ("can_change_settings", "Modifier les paramètres", "Changer la config système", "admin"),
         ("can_view_all_mailboxes", "Voir toutes les boîtes", "Accès aux boîtes de tous les users", "admin"),
         ("can_create_accounts", "Créer des comptes", "Créer de nouveaux utilisateurs", "admin"),
@@ -182,13 +182,17 @@ def init_db():
         ("maintenance_mode", "0"),
         ("site_name", "serveircMail"),
         ("max_users", "100"),
-        ("global_imap_host", os.getenv("IMAP_HOST", "")),
+        # IMAP (reception)
+        ("global_imap_host", os.getenv("IMAP_HOST", "imap.gmail.com")),
         ("global_imap_port", os.getenv("IMAP_PORT", "993")),
-        ("global_smtp_host", os.getenv("SMTP_HOST", "")),
-        ("global_smtp_port", os.getenv("SMTP_PORT", "465")),
-        ("global_smtp_encryption", "SSL"),
         ("global_imap_user", os.getenv("IMAP_USER", "")),
         ("global_mail_password", os.getenv("EMAIL_PASSWORD", "")),
+        # SMTP (envoi Mailtrap)
+        ("global_smtp_host", os.getenv("SMTP_HOST", "live.smtp.mailtrap.io")),
+        ("global_smtp_port", os.getenv("SMTP_PORT", "587")),
+        ("global_smtp_user", os.getenv("SMTP_USER", "api")),
+        ("global_smtp_password", os.getenv("SMTP_PASSWORD", "")),
+        ("global_smtp_encryption", "TLS"),
         ("mail_domain", ""),
     ]
     for k, v in defaults:
@@ -236,7 +240,6 @@ def get_user_by_email(email: str):
     return dict(user) if user else None
 
 def get_user_by_alias(alias: str):
-    """Find user by their mail alias (e.g. jean@youtube.serveirc.com)"""
     conn = get_conn()
     user = conn.execute("SELECT * FROM users WHERE mail_alias=?", (alias,)).fetchone()
     conn.close()
@@ -298,13 +301,12 @@ def delete_user(user_id: int):
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain.encode('utf-8')[:72], hashed)
 
-# ========== PENDING USERS (2FA) ==========
+# ========== PENDING USERS ==========
 
 def create_pending_user(username, display_name, email, password, mail_alias):
     conn = get_conn()
-    # Remove old pending for same email
     conn.execute("DELETE FROM pending_users WHERE email=?", (email,))
-    code = str(secrets.randbelow(900000) + 100000)  # 6 digits
+    code = str(secrets.randbelow(900000) + 100000)
     hashed = _hash_password(password)
     expires = (datetime.utcnow() + timedelta(minutes=15)).isoformat()
     conn.execute(
@@ -325,7 +327,6 @@ def get_pending_user(email: str):
     return dict(row) if row else None
 
 def confirm_pending_user(email: str, code: str):
-    """Verify code and create the real user. Returns (True, user) or (False, error)."""
     pending = get_pending_user(email)
     if not pending:
         return False, "Code expiré ou introuvable"
@@ -335,13 +336,12 @@ def confirm_pending_user(email: str, code: str):
         username=pending["username"],
         display_name=pending["display_name"],
         email=pending["email"],
-        password="__hashed__",  # we'll set hash directly
+        password="__hashed__",
         mail_alias=pending["mail_alias"],
         mail_username=pending["mail_alias"],
     )
     if not ok:
         return False, err
-    # Set the pre-hashed password directly
     conn = get_conn()
     conn.execute("UPDATE users SET password_hash=? WHERE email=?", (pending["password_hash"], pending["email"]))
     conn.execute("DELETE FROM pending_users WHERE email=?", (email,))
