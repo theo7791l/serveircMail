@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Boîte <span>Modération</span></h1>
+    <p class="page-subtitle">Tous les mails reçus — vue globale</p>
+  </div>
+</div>
+
+<div style="display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap;">
+  <div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#f87171;padding:8px 14px;border-radius:var(--radius-sm);font-size:12px;display:flex;align-items:center;gap:6px;">
+    <i class="fa fa-eye"></i> Vue modération — lecture seule
+  </div>
+  <select id="folderSelect" class="form-select" style="width:auto;" onchange="loadMails(1)">
+    <option value="INBOX">INBOX</option>
+    <option value="Sent">Envoyés</option>
+    <option value="Spam">Spam</option>
+    <option value="Trash">Corbeille</option>
+  </select>
+</div>
+
+<div class="card" style="overflow:hidden;">
+  <div id="mailList" style="min-height:200px;">
+    <div style="padding:40px;text-align:center;color:var(--text-muted);"><i class="fa fa-circle-notch fa-spin"></i> Chargement...</div>
+  </div>
+  <div id="pagination" style="padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;justify-content:center;"></div>
+</div>
+
+<script>
+let currentPage = 1;
+async function loadMails(page) {
+  currentPage = page;
+  const folder = document.getElementById('folderSelect').value;
+  document.getElementById('mailList').innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted);"><i class="fa fa-circle-notch fa-spin"></i></div>';
+  const r = await fetch(`/api/moderation/mails?folder=${encodeURIComponent(folder)}&page=${page}&per_page=25`);
+  const d = await r.json();
+  if (d.error) {
+    document.getElementById('mailList').innerHTML = `<div style="padding:32px;text-align:center;color:var(--accent2);"><i class="fa fa-circle-xmark"></i> Erreur : ${d.error}</div>`;
+    return;
+  }
+  if (!d.mails || d.mails.length === 0) {
+    document.getElementById('mailList').innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted);"><i class="fa fa-inbox"></i> Aucun message</div>';
+    return;
+  }
+  let html = '';
+  for (const m of d.mails) {
+    html += `<div style="display:flex;align-items:center;gap:16px;padding:14px 24px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background=''">
+      <div style="width:8px;height:8px;border-radius:50%;background:${m.seen ? 'transparent' : 'var(--primary)'};border:1px solid var(--primary);flex-shrink:0;"></div>
+      <div style="width:180px;flex-shrink:0;font-size:13px;font-weight:${m.seen?'400':'600'};color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.from || ''}</div>
+      <div style="flex:1;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.subject || '(Sans objet)'}</div>
+      <div style="font-size:11px;color:var(--text-dim);flex-shrink:0;">${m.date ? m.date.slice(0,16) : ''}</div>
+    </div>`;
+  }
+  document.getElementById('mailList').innerHTML = html;
+  // Pagination
+  let pag = '';
+  for (let i = 1; i <= d.pages; i++) {
+    pag += `<button onclick="loadMails(${i})" class="btn btn-ghost" style="min-width:36px;padding:6px 10px;${i===page?'background:var(--primary);color:white;':''}">${i}</button>`;
+  }
+  document.getElementById('pagination').innerHTML = pag;
+}
+loadMails(1);
+</script>
+{% endblock %}

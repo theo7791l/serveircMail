@@ -7,7 +7,7 @@ import uvicorn
 import os
 import database as db
 import auth
-from email_client import EmailClient
+from email_client import get_imap_connection, get_mails, get_mail, send_mail, delete_mail, test_imap_connection, _get_mail_config
 from config import settings
 
 db.init_db()
@@ -15,7 +15,6 @@ db.init_db()
 app = FastAPI(title="serveircMail", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-client = EmailClient()
 
 def render(template, request, ctx={}):
     session = request.cookies.get("session")
@@ -67,8 +66,11 @@ async def login(request: Request, username: str = Form(...), password: str = For
 async def register_page(request: Request):
     if db.get_setting("allow_registration", "1") != "1":
         return RedirectResponse("/login?error=registration_closed")
-    roles = [r for r in db.get_all_roles() if r["name"] == "USER"]
-    return render("register.html", request, {"error": request.query_params.get("error", ""), "roles": roles})
+    mail_domain = db.get_setting("mail_domain", "")
+    return render("register.html", request, {
+        "error": request.query_params.get("error", ""),
+        "mail_domain": mail_domain,
+    })
 
 @app.post("/register")
 async def register(request: Request,
@@ -76,19 +78,57 @@ async def register(request: Request,
     display_name: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
-    mail_password: str = Form(default="")):
+    mail_alias_prefix: str = Form(default="")):
     if db.get_setting("allow_registration", "1") != "1":
         return RedirectResponse("/login?error=registration_closed", status_code=302)
+
+    mail_domain = db.get_setting("mail_domain", "")
+    if mail_domain and mail_alias_prefix:
+        mail_alias = f"{mail_alias_prefix.strip().lower()}@{mail_domain}"
+    else:
+        mail_alias = email
+
+    # Check alias not already taken
+    if mail_domain and mail_alias_prefix:
+        existing = db.get_user_by_alias(mail_alias)
+        if existing:
+            return RedirectResponse("/register?error=alias_taken", status_code=302)
+
+    # Check username/email not already taken
+    if db.get_user_by_username(username):
+        return RedirectResponse("/register?error=username_taken", status_code=302)
+    if db.get_user_by_email(email):
+        return RedirectResponse("/register?error=email_taken", status_code=302)
+
     ip = auth.get_client_ip(request)
-    imap_host = db.get_setting("global_imap_host", "")
-    smtp_host = db.get_setting("global_smtp_host", "")
-    ok, err = db.create_user(username, display_name, email, password,
-        imap_host=imap_host, smtp_host=smtp_host, mail_password=mail_password)
+    code = db.create_pending_user(username, display_name, email, password, mail_alias)
+
+    # Send verification email
+    admin_user = {
+        "mail_username": db.get_setting("global_imap_user", ""),
+        "mail_password": db.get_setting("global_mail_password", ""),
+        "imap_host": "", "smtp_host": "", "imap_port": 993, "smtp_port": 465,
+    }
+    body = f"""Bonjour {display_name},\n\nVotre code de vérification pour activer votre compte serveircMail est :\n\n    {code}\n\nCe code expire dans 15 minutes.\n\nSi vous n'avez pas demandé cette inscription, ignorez cet email."""
+    send_mail(admin_user, to=email, subject="[serveircMail] Code de vérification", body=body)
+    db.add_audit_log(None, username, "REGISTER_PENDING", ip=ip, details=f"alias={mail_alias}")
+
+    return render("verify.html", request, {"email": email, "error": ""})
+
+@app.get("/verify", response_class=HTMLResponse)
+async def verify_page(request: Request, email: str = ""):
+    return render("verify.html", request, {"email": email, "error": ""})
+
+@app.post("/verify")
+async def verify(request: Request,
+    email: str = Form(...),
+    code: str = Form(...)):
+    ok, result = db.confirm_pending_user(email, code.strip())
     if not ok:
-        return RedirectResponse(f"/register?error={err}", status_code=302)
-    user = db.get_user_by_username(username)
-    db.add_audit_log(user["id"], username, "REGISTER", ip=ip)
+        return render("verify.html", request, {"email": email, "error": result})
+    user = result
     token = db.create_session(user["id"])
+    db.add_audit_log(user["id"], user["username"], "REGISTER_CONFIRMED", details=f"alias={user.get('mail_alias','')}")
     resp = RedirectResponse("/inbox", status_code=302)
     resp.set_cookie("session", token, httponly=True, max_age=86400*7, samesite="lax")
     return resp
@@ -142,6 +182,15 @@ async def update_profile(request: Request,
     return RedirectResponse("/profile?success=1", status_code=302)
 
 # ============================================================
+# MODERATION MAILBOX
+# ============================================================
+
+@app.get("/moderation/mailbox", response_class=HTMLResponse)
+async def moderation_mailbox(request: Request, user=Depends(auth.require_perm("can_view_all_mails")),
+    page: int = 1, folder: str = "INBOX"):
+    return render("moderation/mailbox.html", request, {"folder": folder, "page": page})
+
+# ============================================================
 # ADMIN ROUTES
 # ============================================================
 
@@ -162,22 +211,27 @@ async def admin_users(request: Request, user=Depends(auth.require_perm("can_mana
 @app.post("/admin/users/create")
 async def admin_create_user(request: Request, user=Depends(auth.require_perm("can_create_accounts")),
     username: str = Form(...), display_name: str = Form(...), email: str = Form(...),
-    password: str = Form(...), role_id: int = Form(4), mail_password: str = Form(default="")):
+    password: str = Form(...), role_id: int = Form(4), mail_password: str = Form(default=""),
+    mail_alias: str = Form(default="")):
     ip = auth.get_client_ip(request)
     imap_host = db.get_setting("global_imap_host", "")
     smtp_host = db.get_setting("global_smtp_host", "")
     ok, err = db.create_user(username, display_name, email, password, role_id,
-        imap_host=imap_host, smtp_host=smtp_host, mail_password=mail_password)
+        imap_host=imap_host, smtp_host=smtp_host, mail_password=mail_password,
+        mail_alias=mail_alias, mail_username=mail_alias)
     db.add_audit_log(user["id"], user["username"], "CREATE_USER", target=username, ip=ip)
     return RedirectResponse("/admin/users", status_code=302)
 
 @app.post("/admin/users/{uid}/update")
 async def admin_update_user(request: Request, uid: int, user=Depends(auth.require_perm("can_manage_users")),
     display_name: str = Form(...), role_id: int = Form(...), is_active: int = Form(1),
-    is_banned: int = Form(0), mail_password: str = Form(default="")):
+    is_banned: int = Form(0), mail_password: str = Form(default=""), mail_alias: str = Form(default="")):
     updates = {"display_name": display_name, "role_id": role_id, "is_active": is_active, "is_banned": is_banned}
     if mail_password:
         updates["mail_password"] = mail_password
+    if mail_alias:
+        updates["mail_alias"] = mail_alias
+        updates["mail_username"] = mail_alias
     db.update_user(uid, **updates)
     db.add_audit_log(user["id"], user["username"], "UPDATE_USER", target=str(uid))
     return RedirectResponse("/admin/users", status_code=302)
@@ -258,48 +312,82 @@ async def admin_save_settings(request: Request, user=Depends(auth.require_perm("
 # API ROUTES
 # ============================================================
 
-def get_mail_client(user):
-    ec = EmailClient(
-        imap_host=user.get("imap_host") or settings.IMAP_HOST,
-        imap_port=user.get("imap_port") or settings.IMAP_PORT,
-        smtp_host=user.get("smtp_host") or settings.SMTP_HOST,
-        smtp_port=user.get("smtp_port") or settings.SMTP_PORT,
-        email_address=user.get("email"),
-        email_password=user.get("mail_password") or settings.EMAIL_PASSWORD,
-    )
-    return ec
-
 @app.get("/api/folders")
 async def api_folders(user=Depends(auth.require_auth)):
-    return {"folders": get_mail_client(user).get_folders()}
+    return {"folders": get_imap_connection(user) and __import__('email_client').get_folders(user)}
 
 @app.get("/api/mails")
 async def api_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20, user=Depends(auth.require_auth)):
-    return get_mail_client(user).get_mails(folder=folder, page=page, per_page=per_page)
+    result = get_mails(user, folder=folder, page=page, per_page=per_page)
+    # Filter: only show mails addressed to this user's alias
+    alias = user.get("mail_alias", "") or user.get("mail_username", "") or user.get("email", "")
+    if alias and result.get("mails"):
+        result["mails"] = [
+            m for m in result["mails"]
+            if alias.lower() in m.get("to", "").lower()
+            or alias.lower() in m.get("recipients", "").lower()
+        ]
+    return result
 
 @app.get("/api/mail/{uid}")
 async def api_mail(uid: int, folder: str = "INBOX", user=Depends(auth.require_auth)):
-    return get_mail_client(user).get_mail(uid=uid, folder=folder)
+    mail = get_mail(user, uid=str(uid), folder=folder)
+    # Security: verify this mail is addressed to this user
+    alias = user.get("mail_alias", "") or user.get("mail_username", "") or user.get("email", "")
+    if alias and "to" in mail:
+        if alias.lower() not in mail["to"].lower():
+            raise HTTPException(403, detail="Ce mail ne vous est pas adressé")
+    return mail
 
 @app.post("/api/send")
 async def api_send(request: Request, user=Depends(auth.require_auth)):
     if not db.user_has_perm(user["id"], "can_send_mail"):
         raise HTTPException(403)
     data = await request.json()
-    result = get_mail_client(user).send_mail(to=data.get("to"), subject=data.get("subject"), body=data.get("body"), html=data.get("html", False))
-    if result.get("success"):
+    # Force From to be user's alias
+    alias = user.get("mail_alias", "") or user.get("mail_username", "") or user.get("email", "")
+    user_with_alias = dict(user)
+    user_with_alias["mail_username"] = alias
+    ok, err = send_mail(user_with_alias, to=data.get("to"), subject=data.get("subject"), body=data.get("body"), html=data.get("html", False))
+    if ok:
         db.add_audit_log(user["id"], user["username"], "SEND_MAIL", target=data.get("to"))
-    return result
+    return {"success": ok, "error": err}
 
 @app.post("/api/mail/{uid}/delete")
 async def api_delete(uid: int, folder: str = "INBOX", user=Depends(auth.require_auth)):
     if not db.user_has_perm(user["id"], "can_delete_mail"):
         raise HTTPException(403)
-    return get_mail_client(user).delete_mail(uid=uid, folder=folder)
+    ok, err = delete_mail(user, uid=str(uid), folder=folder)
+    return {"success": ok, "error": err}
+
+@app.get("/api/moderation/mails")
+async def api_moderation_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20,
+    user=Depends(auth.require_perm("can_view_all_mails"))):
+    # Use global admin account — no filtering
+    admin_user = {
+        "mail_username": db.get_setting("global_imap_user", ""),
+        "mail_password": db.get_setting("global_mail_password", ""),
+        "imap_host": db.get_setting("global_imap_host", ""),
+        "imap_port": int(db.get_setting("global_imap_port", "993")),
+        "smtp_host": db.get_setting("global_smtp_host", ""),
+        "smtp_port": int(db.get_setting("global_smtp_port", "465")),
+    }
+    return get_mails(admin_user, folder=folder, page=page, per_page=per_page)
+
+@app.post("/api/admin/test-mail-connection")
+async def api_test_mail(user=Depends(auth.require_perm("can_change_settings"))):
+    host = db.get_setting("global_imap_host", "")
+    port = int(db.get_setting("global_imap_port", "993"))
+    mail_user = db.get_setting("global_imap_user", "")
+    mail_pass = db.get_setting("global_mail_password", "")
+    if not host or not mail_user or not mail_pass:
+        return JSONResponse({"success": False, "error": "Paramètres IMAP incomplets dans les settings"})
+    ok, result = test_imap_connection(host, port, mail_user, mail_pass)
+    return JSONResponse({"success": ok, "mailbox": result if ok else "", "error": result if not ok else ""})
 
 @app.get("/api/stats")
 async def api_stats(user=Depends(auth.require_auth)):
-    return get_mail_client(user).get_stats()
+    return {"alias": user.get("mail_alias", "")}
 
 @app.get("/api/admin/stats")
 async def api_admin_stats(user=Depends(auth.require_perm("can_view_stats"))):

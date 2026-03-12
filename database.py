@@ -1,7 +1,8 @@
 import sqlite3
 import os
+import secrets
 from passlib.context import CryptContext
-from datetime import datetime
+from datetime import datetime, timedelta
 
 DB_PATH = os.getenv("DB_PATH", "/home/container/serveircmail.db")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -19,6 +20,7 @@ DEFAULT_PERMISSIONS = [
     "can_reset_passwords",
     "can_ban_users",
     "can_view_stats",
+    "can_view_all_mails",
 ]
 
 ROLE_PERMISSIONS = {
@@ -27,10 +29,12 @@ ROLE_PERMISSIONS = {
         "can_send_mail", "can_delete_mail", "can_manage_users",
         "can_view_logs", "can_suspend_users", "can_view_all_mailboxes",
         "can_create_accounts", "can_reset_passwords", "can_view_stats",
+        "can_view_all_mails",
     ],
     "MODERATOR": [
         "can_send_mail", "can_delete_mail",
         "can_view_logs", "can_suspend_users", "can_view_stats",
+        "can_view_all_mails",
     ],
     "USER": ["can_send_mail", "can_delete_mail"],
 }
@@ -85,10 +89,23 @@ def init_db():
         smtp_port INTEGER DEFAULT 587,
         mail_password TEXT DEFAULT '',
         mail_username TEXT DEFAULT '',
+        mail_alias TEXT DEFAULT '',
         is_active INTEGER DEFAULT 1,
         is_banned INTEGER DEFAULT 0,
         avatar_color TEXT DEFAULT '#6C63FF',
         last_login TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now'))
+    )""")
+
+    c.execute("""CREATE TABLE IF NOT EXISTS pending_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        mail_alias TEXT NOT NULL,
+        verification_code TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
         created_at TEXT DEFAULT (datetime('now'))
     )""")
 
@@ -116,14 +133,17 @@ def init_db():
         updated_at TEXT DEFAULT (datetime('now'))
     )""")
 
-    # Migrate: add mail_username column if missing
-    try:
-        c.execute("ALTER TABLE users ADD COLUMN mail_username TEXT DEFAULT ''")
-        conn.commit()
-    except:
-        pass
+    # Migrations
+    for col, typedef in [
+        ("mail_username", "TEXT DEFAULT ''"),
+        ("mail_alias", "TEXT DEFAULT ''"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
+            conn.commit()
+        except:
+            pass
 
-    # Insert default roles
     default_roles = [
         ("SUPER_ADMIN", "Super Admin", "#FF6584", "Contrôle total du système", 1),
         ("ADMIN", "Admin", "#6C63FF", "Gestion des comptes et paramètres", 1),
@@ -133,7 +153,6 @@ def init_db():
     for r in default_roles:
         c.execute("INSERT OR IGNORE INTO roles (name, display_name, color, description, is_system) VALUES (?,?,?,?,?)", r)
 
-    # Insert permissions
     perm_data = [
         ("can_send_mail", "Envoyer des mails", "Peut envoyer des emails", "mail"),
         ("can_delete_mail", "Supprimer des mails", "Peut supprimer ses propres mails", "mail"),
@@ -147,18 +166,17 @@ def init_db():
         ("can_reset_passwords", "Réinitialiser les mdp", "Reset le mot de passe d'un user", "admin"),
         ("can_ban_users", "Bannir des utilisateurs", "Bannir définitivement un compte", "moderation"),
         ("can_view_stats", "Voir les statistiques", "Accès au dashboard de stats", "admin"),
+        ("can_view_all_mails", "Voir tous les mails (modération)", "Accès à la boîte de modération globale", "moderation"),
     ]
     for p in perm_data:
         c.execute("INSERT OR IGNORE INTO permissions (key, label, description, category) VALUES (?,?,?,?)", p)
 
-    # Assign permissions to roles
     for role_name, perms in ROLE_PERMISSIONS.items():
         row = c.execute("SELECT id FROM roles WHERE name=?", (role_name,)).fetchone()
         if row:
             for perm in perms:
                 c.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_key) VALUES (?,?)", (row["id"], perm))
 
-    # Default settings
     defaults = [
         ("allow_registration", "1"),
         ("maintenance_mode", "0"),
@@ -171,6 +189,7 @@ def init_db():
         ("global_smtp_encryption", "SSL"),
         ("global_imap_user", os.getenv("IMAP_USER", "")),
         ("global_mail_password", os.getenv("EMAIL_PASSWORD", "")),
+        ("mail_domain", ""),
     ]
     for k, v in defaults:
         c.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES (?,?)", (k, v))
@@ -216,6 +235,13 @@ def get_user_by_email(email: str):
     conn.close()
     return dict(user) if user else None
 
+def get_user_by_alias(alias: str):
+    """Find user by their mail alias (e.g. jean@youtube.serveirc.com)"""
+    conn = get_conn()
+    user = conn.execute("SELECT * FROM users WHERE mail_alias=?", (alias,)).fetchone()
+    conn.close()
+    return dict(user) if user else None
+
 def get_all_users(search: str = "", page: int = 1, per_page: int = 20):
     conn = get_conn()
     offset = (page - 1) * per_page
@@ -234,7 +260,7 @@ def get_all_users(search: str = "", page: int = 1, per_page: int = 20):
     conn.close()
     return [dict(u) for u in users], total
 
-def create_user(username, display_name, email, password, role_id=4, imap_host="", imap_port=993, smtp_host="", smtp_port=587, mail_password="", mail_username=""):
+def create_user(username, display_name, email, password, role_id=4, imap_host="", imap_port=993, smtp_host="", smtp_port=587, mail_password="", mail_username="", mail_alias=""):
     conn = get_conn()
     hashed = _hash_password(password)
     colors = ["#6C63FF", "#3EC6E0", "#FF6584", "#4ade80", "#fbbf24", "#f472b6"]
@@ -242,8 +268,8 @@ def create_user(username, display_name, email, password, role_id=4, imap_host=""
     color = random.choice(colors)
     try:
         conn.execute(
-            "INSERT INTO users (username, display_name, email, password_hash, role_id, imap_host, imap_port, smtp_host, smtp_port, mail_password, mail_username, avatar_color) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (username, display_name, email, hashed, role_id, imap_host, imap_port, smtp_host, smtp_port, mail_password, mail_username, color)
+            "INSERT INTO users (username, display_name, email, password_hash, role_id, imap_host, imap_port, smtp_host, smtp_port, mail_password, mail_username, mail_alias, avatar_color) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (username, display_name, email, hashed, role_id, imap_host, imap_port, smtp_host, smtp_port, mail_password, mail_username, mail_alias, color)
         )
         conn.commit()
         conn.close()
@@ -272,10 +298,59 @@ def delete_user(user_id: int):
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain.encode('utf-8')[:72], hashed)
 
-# ========== SESSIONS ==========
+# ========== PENDING USERS (2FA) ==========
 
-import secrets
-from datetime import datetime, timedelta
+def create_pending_user(username, display_name, email, password, mail_alias):
+    conn = get_conn()
+    # Remove old pending for same email
+    conn.execute("DELETE FROM pending_users WHERE email=?", (email,))
+    code = str(secrets.randbelow(900000) + 100000)  # 6 digits
+    hashed = _hash_password(password)
+    expires = (datetime.utcnow() + timedelta(minutes=15)).isoformat()
+    conn.execute(
+        "INSERT INTO pending_users (username, display_name, email, password_hash, mail_alias, verification_code, expires_at) VALUES (?,?,?,?,?,?,?)",
+        (username, display_name, email, hashed, mail_alias, code, expires)
+    )
+    conn.commit()
+    conn.close()
+    return code
+
+def get_pending_user(email: str):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM pending_users WHERE email=? AND expires_at > datetime('now') ORDER BY created_at DESC LIMIT 1",
+        (email,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def confirm_pending_user(email: str, code: str):
+    """Verify code and create the real user. Returns (True, user) or (False, error)."""
+    pending = get_pending_user(email)
+    if not pending:
+        return False, "Code expiré ou introuvable"
+    if pending["verification_code"] != code:
+        return False, "Code incorrect"
+    ok, err = create_user(
+        username=pending["username"],
+        display_name=pending["display_name"],
+        email=pending["email"],
+        password="__hashed__",  # we'll set hash directly
+        mail_alias=pending["mail_alias"],
+        mail_username=pending["mail_alias"],
+    )
+    if not ok:
+        return False, err
+    # Set the pre-hashed password directly
+    conn = get_conn()
+    conn.execute("UPDATE users SET password_hash=? WHERE email=?", (pending["password_hash"], pending["email"]))
+    conn.execute("DELETE FROM pending_users WHERE email=?", (email,))
+    conn.commit()
+    conn.close()
+    user = get_user_by_email(email)
+    return True, user
+
+# ========== SESSIONS ==========
 
 def create_session(user_id: int, days: int = 7) -> str:
     token = secrets.token_urlsafe(48)
