@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Paramètres <span>Système</span></h1>
+    <p class="page-subtitle">Configuration globale de serveircMail</p>
+  </div>
+</div>
+
+{% if request.query_params.get('success') %}
+<div class="alert alert-success mb-4"><i class="fa fa-check-circle"></i> Paramètres sauvegardés avec succès !</div>
+{% endif %}
+
+<form method="post" action="/admin/settings">
+<div class="settings-grid">
+
+  <!-- Général -->
+  <div class="card">
+    <div class="settings-section-header">
+      <span class="settings-section-icon" style="background:linear-gradient(135deg,var(--primary),var(--accent))"><i class="fa fa-gear"></i></span>
+      <div>
+        <h3 class="settings-section-title">Général</h3>
+        <p class="settings-section-sub">Paramètres de base du site</p>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="form-group">
+        <label class="form-label">Nom du site</label>
+        <input class="form-input" name="site_name" value="{{ settings.get('site_name','serveircMail') }}" placeholder="serveircMail" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nombre max d'utilisateurs</label>
+        <input class="form-input" type="number" name="max_users" value="{{ settings.get('max_users','100') }}" />
+      </div>
+      <div class="settings-toggle-row">
+        <div>
+          <div style="font-size:14px;font-weight:600;color:var(--text)">Inscriptions ouvertes</div>
+          <div style="font-size:12px;color:var(--text-muted)">Permettre aux nouveaux users de s'inscrire</div>
+        </div>
+        <label class="toggle">
+          <input type="hidden" name="allow_registration" value="0">
+          <input type="checkbox" name="allow_registration" value="1" {{ 'checked' if settings.get('allow_registration','1') == '1' }}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="settings-toggle-row">
+        <div>
+          <div style="font-size:14px;font-weight:600;color:var(--accent2)"><i class="fa fa-triangle-exclamation"></i> Mode maintenance</div>
+          <div style="font-size:12px;color:var(--text-muted)">Bloquer l'accès au site pour les users</div>
+        </div>
+        <label class="toggle">
+          <input type="hidden" name="maintenance_mode" value="0">
+          <input type="checkbox" name="maintenance_mode" value="1" {{ 'checked' if settings.get('maintenance_mode','0') == '1' }}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- IMAP/SMTP Global -->
+  <div class="card">
+    <div class="settings-section-header">
+      <span class="settings-section-icon" style="background:linear-gradient(135deg,var(--accent),#7df3ff)"><i class="fa fa-envelope"></i></span>
+      <div>
+        <h3 class="settings-section-title">Serveur Mail Global</h3>
+        <p class="settings-section-sub">IMAP/SMTP par défaut pour tous les users</p>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">IMAP Host</label>
+          <input class="form-input" name="global_imap_host" value="{{ settings.get('global_imap_host','') }}" placeholder="imap.example.com" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">IMAP Port</label>
+          <input class="form-input" type="number" name="global_imap_port" value="{{ settings.get('global_imap_port','993') }}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">SMTP Host</label>
+          <input class="form-input" name="global_smtp_host" value="{{ settings.get('global_smtp_host','') }}" placeholder="smtp.example.com" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">SMTP Port</label>
+          <input class="form-input" type="number" name="global_smtp_port" value="{{ settings.get('global_smtp_port','587') }}" />
+        </div>
+      </div>
+      <div class="settings-info-box">
+        <i class="fa fa-circle-info" style="color:var(--accent)"></i>
+        Ces valeurs sont utilisées pour les nouveaux comptes et comme fallback si un user n'a pas configuré son propre serveur mail.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div style="display:flex;justify-content:flex-end;margin-top:24px">
+  <button type="submit" class="btn btn-primary btn-lg"><i class="fa fa-floppy-disk"></i> Sauvegarder les paramètres</button>
+</div>
+</form>
+
+<style>
+.settings-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(400px,1fr)); gap:20px; }
+.settings-section-header { padding:20px 24px 16px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(255,255,255,0.05); }
+.settings-section-icon { width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px;color:white;flex-shrink:0;box-shadow:0 4px 20px rgba(0,0,0,0.3); }
+.settings-section-title { font-size:15px;font-weight:700;color:var(--text); }
+.settings-section-sub { font-size:12px;color:var(--text-muted);margin-top:2px; }
+.settings-toggle-row { display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-top:1px solid rgba(255,255,255,0.05); }
+.settings-info-box { background:rgba(62,198,224,0.06);border:1px solid rgba(62,198,224,0.2);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:flex-start;margin-top:8px; }
+.alert { padding:14px 18px;border-radius:var(--radius-sm);font-size:13px;display:flex;align-items:center;gap:10px; }
+.alert-success { background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);color:var(--accent3); }
+@media(max-width:700px){.settings-grid{grid-template-columns:1fr;}}
+</style>
+{% endblock %}

@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Gestion des <span>Utilisateurs</span></h1>
+    <p class="page-subtitle">{{ total }} utilisateur{{ 's' if total != 1 }} au total</p>
+  </div>
+  <div class="flex gap-2">
+    <button onclick="openModal('createUserModal')" class="btn btn-primary"><i class="fa fa-user-plus"></i> Nouvel utilisateur</button>
+  </div>
+</div>
+
+<!-- Search -->
+<form method="get" class="mb-4">
+  <div class="search-bar" style="max-width:420px">
+    <input type="text" name="search" value="{{ search }}" placeholder="Rechercher un utilisateur..." />
+    <i class="fa fa-magnifying-glass search-icon"></i>
+  </div>
+</form>
+
+<!-- Table -->
+<div class="card">
+  <div class="table-wrapper" style="border:none;border-radius:0">
+    <table>
+      <thead>
+        <tr>
+          <th>Utilisateur</th>
+          <th>Email</th>
+          <th>Rôle</th>
+          <th>Statut</th>
+          <th>Créé le</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr style="animation-delay:{{ loop.index0 * 0.04 }}s">
+          <td>
+            <div class="flex items-center gap-2">
+              <div class="avatar avatar-sm" style="background:{{ u.avatar_color or '#6C63FF' }}">{{ u.display_name[0]|upper }}</div>
+              <div>
+                <div style="font-weight:600;font-size:13px">{{ u.display_name }}</div>
+                <div style="font-size:11px;color:var(--text-dim)">@{{ u.username }}</div>
+              </div>
+            </div>
+          </td>
+          <td class="text-sm text-muted">{{ u.email }}</td>
+          <td>
+            <span class="badge badge-role" style="--role-color:{{ u.role_color or '#6C63FF' }}">{{ u.role_display or u.role_name }}</span>
+          </td>
+          <td>
+            {% if u.is_banned %}
+              <span class="badge badge-suspended"><i class="fa fa-ban"></i> Banni</span>
+            {% elif not u.is_active %}
+              <span class="badge badge-suspended"><i class="fa fa-pause"></i> Suspendu</span>
+            {% else %}
+              <span class="badge badge-active"><i class="fa fa-check"></i> Actif</span>
+            {% endif %}
+          </td>
+          <td class="text-sm text-muted">{{ u.created_at[:10] }}</td>
+          <td>
+            <div class="flex gap-2">
+              <button onclick="openEditModal({{ u|tojson }})" class="btn btn-ghost btn-sm btn-icon" title="Modifier"><i class="fa fa-pen"></i></button>
+              {% if not u.is_banned %}
+                {% if u.is_active %}
+                  <button onclick="userAction({{ u.id }}, 'suspend')" class="btn btn-warning btn-sm btn-icon" title="Suspendre"><i class="fa fa-pause"></i></button>
+                {% else %}
+                  <button onclick="userAction({{ u.id }}, 'unsuspend')" class="btn btn-success btn-sm btn-icon" title="Réactiver"><i class="fa fa-play"></i></button>
+                {% endif %}
+                <button onclick="userAction({{ u.id }}, 'ban')" class="btn btn-danger btn-sm btn-icon" title="Bannir"><i class="fa fa-ban"></i></button>
+              {% else %}
+                <button onclick="userAction({{ u.id }}, 'unban')" class="btn btn-success btn-sm btn-icon" title="Débannir"><i class="fa fa-check"></i></button>
+              {% endif %}
+              <button onclick="confirmDelete({{ u.id }}, '{{ u.username }}')" class="btn btn-danger btn-sm btn-icon" title="Supprimer"><i class="fa fa-trash"></i></button>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted)">Aucun utilisateur trouvé</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Pagination -->
+{% if pages > 1 %}
+<div class="pagination">
+  {% for p in range(1, pages+1) %}
+    <a href="?page={{ p }}&search={{ search }}" class="page-btn {{ 'active' if p == page }}" >{{ p }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Create Modal -->
+<div class="modal-overlay hidden" id="createUserModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fa fa-user-plus" style="color:var(--primary)"></i> Créer un utilisateur</span>
+      <button class="modal-close" onclick="closeModal('createUserModal')"><i class="fa fa-xmark"></i></button>
+    </div>
+    <form method="post" action="/admin/users/create">
+      <div class="modal-body">
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Nom d'utilisateur</label>
+            <input class="form-input" name="username" required placeholder="ex: johndoe" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Nom affiché</label>
+            <input class="form-input" name="display_name" required placeholder="ex: John Doe" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email</label>
+          <input class="form-input" type="email" name="email" required placeholder="user@example.com" />
+        </div>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Mot de passe</label>
+            <input class="form-input" type="password" name="password" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Rôle</label>
+            <select class="form-select" name="role_id">
+              {% for r in roles %}<option value="{{ r.id }}">{{ r.display_name }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Mot de passe mail (IMAP/SMTP)</label>
+          <input class="form-input" type="password" name="mail_password" placeholder="Optionnel" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" onclick="closeModal('createUserModal')" class="btn btn-ghost">Annuler</button>
+        <button type="submit" class="btn btn-primary"><i class="fa fa-check"></i> Créer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal-overlay hidden" id="editUserModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fa fa-pen" style="color:var(--accent)"></i> Modifier l'utilisateur</span>
+      <button class="modal-close" onclick="closeModal('editUserModal')"><i class="fa fa-xmark"></i></button>
+    </div>
+    <form id="editUserForm" method="post">
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Nom affiché</label>
+          <input class="form-input" name="display_name" id="edit_display_name" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Rôle</label>
+          <select class="form-select" name="role_id" id="edit_role_id">
+            {% for r in roles %}<option value="{{ r.id }}">{{ r.display_name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Nouveau mot de passe mail</label>
+          <input class="form-input" type="password" name="mail_password" placeholder="Laisser vide pour ne pas changer" />
+        </div>
+        <input type="hidden" name="is_active" value="1" />
+        <input type="hidden" name="is_banned" value="0" />
+      </div>
+      <div class="modal-footer">
+        <button type="button" onclick="closeModal('editUserModal')" class="btn btn-ghost">Annuler</button>
+        <button type="submit" class="btn btn-primary"><i class="fa fa-check"></i> Sauvegarder</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Delete Confirm -->
+<div class="modal-overlay hidden" id="deleteModal">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <span class="modal-title" style="color:var(--accent2)"><i class="fa fa-triangle-exclamation"></i> Confirmer la suppression</span>
+      <button class="modal-close" onclick="closeModal('deleteModal')"><i class="fa fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--text-muted);font-size:14px">Vous allez supprimer définitivement le compte <strong id="deleteUsername" style="color:var(--text)"></strong>. Cette action est irréversible.</p>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeModal('deleteModal')" class="btn btn-ghost">Annuler</button>
+      <form id="deleteForm" method="post">
+        <button type="submit" class="btn btn-danger"><i class="fa fa-trash"></i> Supprimer</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<style>
+.pagination { display:flex; gap:6px; margin-top:20px; justify-content:center; }
+.page-btn { padding:8px 14px; border-radius:8px; background:var(--bg-card); border:1px solid var(--border); color:var(--text-muted); text-decoration:none; font-size:13px; font-weight:600; transition:var(--transition); }
+.page-btn:hover { border-color:var(--border-glow); color:var(--text); }
+.page-btn.active { background:linear-gradient(135deg,var(--primary),var(--accent)); color:white; border-color:transparent; box-shadow:var(--glow-purple); }
+</style>
+
+<script>
+function openModal(id){ document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id){ document.getElementById(id).classList.add('hidden'); }
+function openEditModal(u){
+  document.getElementById('edit_display_name').value = u.display_name;
+  document.getElementById('edit_role_id').value = u.role_id;
+  document.getElementById('editUserForm').action = '/admin/users/' + u.id + '/update';
+  openModal('editUserModal');
+}
+function confirmDelete(id, username){
+  document.getElementById('deleteUsername').textContent = username;
+  document.getElementById('deleteForm').action = '/admin/users/' + id + '/delete';
+  openModal('deleteModal');
+}
+async function userAction(id, action){
+  const res = await fetch('/admin/users/' + id + '/' + action, {method:'POST'});
+  const data = await res.json();
+  if(data.success) location.reload();
+}
+document.querySelectorAll('.modal-overlay').forEach(o=>{
+  o.addEventListener('click', e=>{ if(e.target===o) o.classList.add('hidden'); });
+});
+</script>
+{% endblock %}
