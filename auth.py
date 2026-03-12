@@ -1,37 +1,34 @@
 from fastapi import Request, Cookie, HTTPException, Depends
+from fastapi.responses import RedirectResponse
 from typing import Optional
-from database import get_session_user, get_user_permissions
+import database as db
 
-def get_current_user(session: Optional[str] = Cookie(default=None)):
-    if not session:
-        return None
-    user = get_session_user(session)
+def get_current_user(request: Request, session: Optional[str] = Cookie(default=None)):
+    user = db.get_session_user(session)
     return user
 
-def require_user(session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
+def require_auth(request: Request, session: Optional[str] = Cookie(default=None)):
+    user = db.get_session_user(session)
     if not user:
-        from fastapi.responses import RedirectResponse
         raise HTTPException(status_code=307, headers={"Location": "/login"})
+    if user.get("is_banned"):
+        raise HTTPException(status_code=403, detail="Compte banni")
+    if not user.get("is_active"):
+        raise HTTPException(status_code=403, detail="Compte suspendu")
     return user
 
-def require_permission(permission: str):
-    def dep(session: Optional[str] = Cookie(default=None)):
-        user = get_current_user(session)
+def require_perm(perm: str):
+    def checker(request: Request, session: Optional[str] = Cookie(default=None)):
+        user = db.get_session_user(session)
         if not user:
             raise HTTPException(status_code=307, headers={"Location": "/login"})
-        perms = get_user_permissions(user["id"])
-        if permission not in perms:
-            raise HTTPException(status_code=403, detail="Permission refusée")
+        if not db.user_has_perm(user["id"], perm):
+            raise HTTPException(status_code=403, detail=f"Permission requise : {perm}")
         return user
-    return dep
+    return checker
 
-def require_role_level(min_level: int):
-    def dep(session: Optional[str] = Cookie(default=None)):
-        user = get_current_user(session)
-        if not user:
-            raise HTTPException(status_code=307, headers={"Location": "/login"})
-        if user["role_level"] < min_level:
-            raise HTTPException(status_code=403, detail="Niveau de rôle insuffisant")
-        return user
-    return dep
+def get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"

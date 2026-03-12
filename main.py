@@ -1,458 +1,309 @@
-from fastapi import FastAPI, Request, Form, HTTPException, Depends, Cookie
+from fastapi import FastAPI, Request, Form, HTTPException, Depends, Response, Cookie
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import Optional
-import uvicorn, os, json
-from database import (
-    init_db, get_db, hash_password, verify_password,
-    create_session, get_setting, set_setting,
-    get_user_permissions, log_action
-)
-from auth import get_current_user, require_user, require_role_level, require_permission
+import uvicorn
+import os
+import database as db
+import auth
 from email_client import EmailClient
+from config import settings
+
+db.init_db()
 
 app = FastAPI(title="serveircMail", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+client = EmailClient()
 
-@app.on_event("startup")
-async def startup():
-    init_db()
-
-def tmpl(name, request, user=None, **ctx):
-    perms = get_user_permissions(user["id"]) if user else []
-    return templates.TemplateResponse(name, {
-        "request": request,
-        "current_user": user,
-        "permissions": perms,
-        "site_name": get_setting("site_name", "serveircMail"),
-        **ctx
-    })
+def render(template, request, ctx={}):
+    session = request.cookies.get("session")
+    user = db.get_session_user(session)
+    perms = db.get_user_permissions(user["id"]) if user else []
+    site_name = db.get_setting("site_name", "serveircMail")
+    maintenance = db.get_setting("maintenance_mode", "0")
+    base = {"request": request, "current_user": user, "user_perms": perms, "site_name": site_name, "maintenance_mode": maintenance}
+    base.update(ctx)
+    return templates.TemplateResponse(template, base)
 
 # ============================================================
-# PUBLIC
+# AUTH ROUTES
 # ============================================================
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
+async def root(request: Request):
+    session = request.cookies.get("session")
+    user = db.get_session_user(session)
     if user:
         return RedirectResponse("/inbox")
     return RedirectResponse("/login")
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if user:
+async def login_page(request: Request):
+    session = request.cookies.get("session")
+    if db.get_session_user(session):
         return RedirectResponse("/inbox")
-    error = request.query_params.get("error", "")
-    return tmpl("login.html", request, error=error)
+    return render("login.html", request, {"error": request.query_params.get("error", "")})
 
 @app.post("/login")
-async def login_post(request: Request, username: str = Form(...), password: str = Form(...)):
-    if get_setting("maintenance_mode") == "1":
-        conn = get_db()
-        u = conn.execute("SELECT u.*, r.level as role_level FROM users u JOIN roles r ON u.role_id=r.id WHERE u.username=?", (username,)).fetchone()
-        conn.close()
-        if not u or u["role_level"] < 80:
-            return RedirectResponse("/maintenance", status_code=302)
-    conn = get_db()
-    u = conn.execute("""
-        SELECT u.*, r.name as role_name, r.level as role_level
-        FROM users u JOIN roles r ON u.role_id=r.id
-        WHERE (u.username=? OR u.email=?) AND u.is_active=1
-    """, (username, username)).fetchone()
-    conn.close()
-    if not u or not verify_password(password, u["password_hash"]):
+async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    ip = auth.get_client_ip(request)
+    user = db.get_user_by_username(username)
+    if not user or not db.verify_password(password, user["password_hash"]):
+        db.add_audit_log(None, username, "LOGIN_FAILED", ip=ip, details="Mauvais identifiants")
         return RedirectResponse("/login?error=invalid", status_code=302)
-    if u["is_suspended"]:
+    if user["is_banned"]:
+        return RedirectResponse("/login?error=banned", status_code=302)
+    if not user["is_active"]:
         return RedirectResponse("/login?error=suspended", status_code=302)
-    ip = request.client.host if request.client else ""
-    ua = request.headers.get("user-agent", "")
-    sid = create_session(u["id"], ip, ua)
-    conn = get_db()
-    conn.execute("UPDATE users SET last_login=datetime('now'), login_count=login_count+1 WHERE id=?", (u["id"],))
-    conn.commit(); conn.close()
-    log_action(u["id"], "login", ip=ip)
+    token = db.create_session(user["id"])
+    db.add_audit_log(user["id"], user["username"], "LOGIN", ip=ip)
     resp = RedirectResponse("/inbox", status_code=302)
-    resp.set_cookie("session", sid, httponly=True, max_age=86400*7, samesite="lax")
+    resp.set_cookie("session", token, httponly=True, max_age=86400*7, samesite="lax")
     return resp
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    if get_setting("allow_registration") != "1":
+    if db.get_setting("allow_registration", "1") != "1":
         return RedirectResponse("/login?error=registration_closed")
-    return tmpl("register.html", request)
+    roles = [r for r in db.get_all_roles() if r["name"] == "USER"]
+    return render("register.html", request, {"error": request.query_params.get("error", ""), "roles": roles})
 
 @app.post("/register")
-async def register_post(request: Request,
-    username: str = Form(...), email: str = Form(...),
-    display_name: str = Form(...), password: str = Form(...),
-    mail_address: str = Form(default=""), mail_password: str = Form(default=""),
-    imap_host: str = Form(default=""), smtp_host: str = Form(default="")):
-    if get_setting("allow_registration") != "1":
-        return RedirectResponse("/login?error=registration_closed")
-    conn = get_db()
-    existing = conn.execute("SELECT id FROM users WHERE username=? OR email=?", (username, email)).fetchone()
-    if existing:
-        conn.close()
-        return tmpl("register.html", request, error="Ce nom d'utilisateur ou email est déjà pris.")
-    user_role = conn.execute("SELECT id FROM roles WHERE name='user'").fetchone()
-    imap_host_val = imap_host or get_setting("default_imap_host", "")
-    smtp_host_val = smtp_host or get_setting("default_smtp_host", "")
-    conn.execute("""
-        INSERT INTO users (username, email, display_name, password_hash, role_id,
-            mail_address, mail_password, imap_host, imap_port, smtp_host, smtp_port)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (username, email, display_name, hash_password(password), user_role[0],
-          mail_address, mail_password, imap_host_val,
-          int(get_setting("default_imap_port", 993)),
-          smtp_host_val, int(get_setting("default_smtp_port", 587))))
-    conn.commit()
-    uid = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()[0]
-    conn.close()
-    log_action(uid, "register", details=f"Nouveau compte: {username}")
-    return RedirectResponse("/login?success=registered", status_code=302)
+async def register(request: Request,
+    username: str = Form(...),
+    display_name: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    mail_password: str = Form(default="")):
+    if db.get_setting("allow_registration", "1") != "1":
+        return RedirectResponse("/login?error=registration_closed", status_code=302)
+    ip = auth.get_client_ip(request)
+    imap_host = db.get_setting("global_imap_host", "")
+    smtp_host = db.get_setting("global_smtp_host", "")
+    ok, err = db.create_user(username, display_name, email, password,
+        imap_host=imap_host, smtp_host=smtp_host, mail_password=mail_password)
+    if not ok:
+        return RedirectResponse(f"/register?error={err}", status_code=302)
+    user = db.get_user_by_username(username)
+    db.add_audit_log(user["id"], username, "REGISTER", ip=ip)
+    token = db.create_session(user["id"])
+    resp = RedirectResponse("/inbox", status_code=302)
+    resp.set_cookie("session", token, httponly=True, max_age=86400*7, samesite="lax")
+    return resp
 
 @app.get("/logout")
-async def logout(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
+async def logout(request: Request):
+    token = request.cookies.get("session")
+    user = db.get_session_user(token)
     if user:
-        log_action(user["id"], "logout")
-        conn = get_db()
-        conn.execute("DELETE FROM sessions WHERE id=?", (session,))
-        conn.commit(); conn.close()
+        db.add_audit_log(user["id"], user["username"], "LOGOUT")
+    db.delete_session(token)
     resp = RedirectResponse("/login")
     resp.delete_cookie("session")
     return resp
 
-@app.get("/maintenance", response_class=HTMLResponse)
-async def maintenance(request: Request):
-    return tmpl("maintenance.html", request)
-
 # ============================================================
-# MAIL
+# MAIL ROUTES
 # ============================================================
 
 @app.get("/inbox", response_class=HTMLResponse)
-async def inbox(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: return RedirectResponse("/login")
-    if get_setting("maintenance_mode") == "1" and user["role_level"] < 80:
-        return RedirectResponse("/maintenance")
-    return tmpl("inbox.html", request, user, folder=request.query_params.get("folder", "INBOX"))
+async def inbox(request: Request, user=Depends(auth.require_auth), page: int = 1, folder: str = "INBOX"):
+    return render("inbox.html", request, {"folder": folder, "page": page})
 
 @app.get("/compose", response_class=HTMLResponse)
-async def compose(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: return RedirectResponse("/login")
-    return tmpl("compose.html", request, user,
-        reply_to=request.query_params.get("reply_to", ""),
-        subject=request.query_params.get("subject", ""))
+async def compose(request: Request, user=Depends(auth.require_auth), reply_to: str = "", subject: str = ""):
+    return render("compose.html", request, {"reply_to": reply_to, "subject": subject})
 
 @app.get("/mail/{uid}", response_class=HTMLResponse)
-async def read_mail(request: Request, uid: int, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: return RedirectResponse("/login")
-    return tmpl("read.html", request, user, uid=uid,
-        folder=request.query_params.get("folder", "INBOX"))
+async def read_mail(request: Request, uid: int, folder: str = "INBOX", user=Depends(auth.require_auth)):
+    return render("read.html", request, {"uid": uid, "folder": folder})
 
 @app.get("/profile", response_class=HTMLResponse)
-async def profile(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: return RedirectResponse("/login")
-    return tmpl("profile.html", request, user)
+async def profile(request: Request, user=Depends(auth.require_auth)):
+    role = db.get_all_roles()
+    user_role = next((r for r in role if r["id"] == user["role_id"]), None)
+    return render("profile.html", request, {"user_role": user_role})
 
-@app.post("/profile/update")
-async def profile_update(request: Request,
-    display_name: str = Form(...), mail_address: str = Form(default=""),
-    mail_password: str = Form(default=""), imap_host: str = Form(default=""),
-    smtp_host: str = Form(default=""), session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: return RedirectResponse("/login")
-    conn = get_db()
-    conn.execute("""
-        UPDATE users SET display_name=?, mail_address=?, mail_password=?,
-        imap_host=?, smtp_host=?, updated_at=datetime('now') WHERE id=?
-    """, (display_name, mail_address, mail_password, imap_host, smtp_host, user["id"]))
-    conn.commit(); conn.close()
-    log_action(user["id"], "profile_update")
+@app.post("/profile")
+async def update_profile(request: Request,
+    display_name: str = Form(...),
+    mail_password: str = Form(default=""),
+    new_password: str = Form(default=""),
+    user=Depends(auth.require_auth)):
+    updates = {"display_name": display_name}
+    if mail_password:
+        updates["mail_password"] = mail_password
+    if new_password:
+        updates["password"] = new_password
+    db.update_user(user["id"], **updates)
+    db.add_audit_log(user["id"], user["username"], "PROFILE_UPDATE")
     return RedirectResponse("/profile?success=1", status_code=302)
 
 # ============================================================
-# MAIL API
-# ============================================================
-
-def get_email_client(user):
-    return EmailClient(
-        imap_host=user["imap_host"] or "",
-        imap_port=user["imap_port"] or 993,
-        smtp_host=user["smtp_host"] or "",
-        smtp_port=user["smtp_port"] or 587,
-        email_address=user["mail_address"] or "",
-        email_password=user["mail_password"] or ""
-    )
-
-@app.get("/api/folders")
-async def api_folders(session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: raise HTTPException(401)
-    return {"folders": get_email_client(user).get_folders()}
-
-@app.get("/api/mails")
-async def api_mails(folder: str = "INBOX", page: int = 1, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: raise HTTPException(401)
-    return get_email_client(user).get_mails(folder=folder, page=page)
-
-@app.get("/api/mail/{uid}")
-async def api_mail(uid: int, folder: str = "INBOX", session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: raise HTTPException(401)
-    return get_email_client(user).get_mail(uid=uid, folder=folder)
-
-@app.post("/api/send")
-async def api_send(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: raise HTTPException(401)
-    perms = get_user_permissions(user["id"])
-    if "can_send_mail" not in perms: raise HTTPException(403, "Permission refusée")
-    data = await request.json()
-    result = get_email_client(user).send_mail(data.get("to"), data.get("subject"), data.get("body"), data.get("html", False))
-    if result.get("success"): log_action(user["id"], "send_mail", details=f"To: {data.get('to')}")
-    return result
-
-@app.post("/api/mail/{uid}/delete")
-async def api_delete(uid: int, folder: str = "INBOX", session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: raise HTTPException(401)
-    perms = get_user_permissions(user["id"])
-    if "can_delete_mail" not in perms: raise HTTPException(403)
-    return get_email_client(user).delete_mail(uid=uid, folder=folder)
-
-@app.post("/api/mail/{uid}/read")
-async def api_mark_read(uid: int, folder: str = "INBOX", session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: raise HTTPException(401)
-    return get_email_client(user).mark_read(uid=uid, folder=folder)
-
-@app.get("/api/stats")
-async def api_stats(session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user: raise HTTPException(401)
-    return get_email_client(user).get_stats()
-
-# ============================================================
-# ADMIN PANEL
+# ADMIN ROUTES
 # ============================================================
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_dashboard(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 50: raise HTTPException(403)
-    conn = get_db()
-    stats = {
-        "total_users": conn.execute("SELECT COUNT(*) FROM users").fetchone()[0],
-        "active_users": conn.execute("SELECT COUNT(*) FROM users WHERE is_active=1 AND is_suspended=0").fetchone()[0],
-        "suspended_users": conn.execute("SELECT COUNT(*) FROM users WHERE is_suspended=1").fetchone()[0],
-        "total_roles": conn.execute("SELECT COUNT(*) FROM roles").fetchone()[0],
-        "recent_logs": conn.execute("""
-            SELECT a.*, u.username, u.display_name FROM audit_logs a
-            LEFT JOIN users u ON a.user_id=u.id
-            ORDER BY a.created_at DESC LIMIT 10
-        """).fetchall()
-    }
-    conn.close()
-    return tmpl("admin/dashboard.html", request, user, stats=stats)
+async def admin_dashboard(request: Request, user=Depends(auth.require_perm("can_view_stats"))):
+    stats = db.get_global_stats()
+    logs, _ = db.get_audit_logs(per_page=10)
+    return render("admin/dashboard.html", request, {"stats": stats, "recent_logs": logs})
 
 @app.get("/admin/users", response_class=HTMLResponse)
-async def admin_users(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 50: raise HTTPException(403)
-    conn = get_db()
-    users = conn.execute("""
-        SELECT u.*, r.display_name as role_display, r.color as role_color, r.icon as role_icon, r.level as role_level
-        FROM users u LEFT JOIN roles r ON u.role_id=r.id ORDER BY u.created_at DESC
-    """).fetchall()
-    roles = conn.execute("SELECT * FROM roles ORDER BY level DESC").fetchall()
-    conn.close()
-    return tmpl("admin/users.html", request, user, users=users, roles=roles)
+async def admin_users(request: Request, user=Depends(auth.require_perm("can_manage_users")),
+    page: int = 1, search: str = ""):
+    users, total = db.get_all_users(search=search, page=page)
+    roles = db.get_all_roles()
+    pages = max(1, -(-total // 20))
+    return render("admin/users.html", request, {"users": users, "roles": roles, "total": total, "page": page, "pages": pages, "search": search})
 
-@app.post("/admin/users/{uid}/suspend")
-async def admin_suspend(uid: int, reason: str = Form(default=""), session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 50: raise HTTPException(403)
-    perms = get_user_permissions(user["id"])
-    if "can_suspend_users" not in perms: raise HTTPException(403)
-    conn = get_db()
-    target = conn.execute("SELECT u.*, r.level as role_level FROM users u JOIN roles r ON u.role_id=r.id WHERE u.id=?", (uid,)).fetchone()
-    if target and target["role_level"] >= user["role_level"]: raise HTTPException(403, "Impossible de suspendre ce compte")
-    conn.execute("UPDATE users SET is_suspended=1, suspension_reason=? WHERE id=?", (reason, uid))
-    conn.commit(); conn.close()
-    log_action(user["id"], "suspend_user", "user", uid, reason)
+@app.post("/admin/users/create")
+async def admin_create_user(request: Request, user=Depends(auth.require_perm("can_create_accounts")),
+    username: str = Form(...), display_name: str = Form(...), email: str = Form(...),
+    password: str = Form(...), role_id: int = Form(4), mail_password: str = Form(default="")):
+    ip = auth.get_client_ip(request)
+    imap_host = db.get_setting("global_imap_host", "")
+    smtp_host = db.get_setting("global_smtp_host", "")
+    ok, err = db.create_user(username, display_name, email, password, role_id,
+        imap_host=imap_host, smtp_host=smtp_host, mail_password=mail_password)
+    db.add_audit_log(user["id"], user["username"], "CREATE_USER", target=username, ip=ip)
     return RedirectResponse("/admin/users", status_code=302)
 
-@app.post("/admin/users/{uid}/unsuspend")
-async def admin_unsuspend(uid: int, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 50: raise HTTPException(403)
-    conn = get_db()
-    conn.execute("UPDATE users SET is_suspended=0, suspension_reason=NULL WHERE id=?", (uid,))
-    conn.commit(); conn.close()
-    log_action(user["id"], "unsuspend_user", "user", uid)
-    return RedirectResponse("/admin/users", status_code=302)
-
-@app.post("/admin/users/{uid}/role")
-async def admin_change_role(uid: int, role_id: int = Form(...), session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 80: raise HTTPException(403)
-    perms = get_user_permissions(user["id"])
-    if "can_manage_users" not in perms: raise HTTPException(403)
-    conn = get_db()
-    target_role = conn.execute("SELECT level FROM roles WHERE id=?", (role_id,)).fetchone()
-    if target_role and target_role["level"] >= user["role_level"] and user["role_level"] < 100:
-        raise HTTPException(403, "Impossible d'assigner ce rôle")
-    conn.execute("UPDATE users SET role_id=? WHERE id=?", (role_id, uid))
-    conn.commit(); conn.close()
-    log_action(user["id"], "change_role", "user", uid, f"role_id={role_id}")
+@app.post("/admin/users/{uid}/update")
+async def admin_update_user(request: Request, uid: int, user=Depends(auth.require_perm("can_manage_users")),
+    display_name: str = Form(...), role_id: int = Form(...), is_active: int = Form(1),
+    is_banned: int = Form(0), mail_password: str = Form(default="")):
+    updates = {"display_name": display_name, "role_id": role_id, "is_active": is_active, "is_banned": is_banned}
+    if mail_password:
+        updates["mail_password"] = mail_password
+    db.update_user(uid, **updates)
+    db.add_audit_log(user["id"], user["username"], "UPDATE_USER", target=str(uid))
     return RedirectResponse("/admin/users", status_code=302)
 
 @app.post("/admin/users/{uid}/delete")
-async def admin_delete_user(uid: int, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 80: raise HTTPException(403)
-    if uid == user["id"]: raise HTTPException(400, "Impossible de se supprimer soi-même")
-    conn = get_db()
-    conn.execute("DELETE FROM users WHERE id=?", (uid,))
-    conn.commit(); conn.close()
-    log_action(user["id"], "delete_user", "user", uid)
+async def admin_delete_user(request: Request, uid: int, user=Depends(auth.require_perm("can_manage_users"))):
+    target = db.get_user_by_id(uid)
+    db.delete_user(uid)
+    db.add_audit_log(user["id"], user["username"], "DELETE_USER", target=target["username"] if target else str(uid))
     return RedirectResponse("/admin/users", status_code=302)
 
-@app.post("/admin/users/{uid}/reset-password")
-async def admin_reset_password(uid: int, new_password: str = Form(...), session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 80: raise HTTPException(403)
-    conn = get_db()
-    conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(new_password), uid))
-    conn.commit(); conn.close()
-    log_action(user["id"], "reset_password", "user", uid)
-    return RedirectResponse("/admin/users", status_code=302)
+@app.post("/admin/users/{uid}/suspend")
+async def admin_suspend(request: Request, uid: int, user=Depends(auth.require_perm("can_suspend_users"))):
+    db.update_user(uid, is_active=0)
+    db.add_audit_log(user["id"], user["username"], "SUSPEND_USER", target=str(uid))
+    return JSONResponse({"success": True})
+
+@app.post("/admin/users/{uid}/unsuspend")
+async def admin_unsuspend(request: Request, uid: int, user=Depends(auth.require_perm("can_suspend_users"))):
+    db.update_user(uid, is_active=1)
+    db.add_audit_log(user["id"], user["username"], "UNSUSPEND_USER", target=str(uid))
+    return JSONResponse({"success": True})
+
+@app.post("/admin/users/{uid}/ban")
+async def admin_ban(request: Request, uid: int, user=Depends(auth.require_perm("can_ban_users"))):
+    db.update_user(uid, is_banned=1, is_active=0)
+    db.add_audit_log(user["id"], user["username"], "BAN_USER", target=str(uid))
+    return JSONResponse({"success": True})
+
+@app.post("/admin/users/{uid}/unban")
+async def admin_unban(request: Request, uid: int, user=Depends(auth.require_perm("can_ban_users"))):
+    db.update_user(uid, is_banned=0, is_active=1)
+    db.add_audit_log(user["id"], user["username"], "UNBAN_USER", target=str(uid))
+    return JSONResponse({"success": True})
 
 @app.get("/admin/roles", response_class=HTMLResponse)
-async def admin_roles(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 80: raise HTTPException(403)
-    conn = get_db()
-    roles = conn.execute("SELECT * FROM roles ORDER BY level DESC").fetchall()
-    permissions = conn.execute("SELECT * FROM permissions").fetchall()
-    role_perms = {}
-    for r in roles:
-        rp = conn.execute("SELECT p.name FROM permissions p JOIN role_permissions rp ON p.id=rp.permission_id WHERE rp.role_id=?", (r["id"],)).fetchall()
-        role_perms[r["id"]] = [x["name"] for x in rp]
-    conn.close()
-    return tmpl("admin/roles.html", request, user, roles=roles, permissions=permissions, role_perms=role_perms)
+async def admin_roles(request: Request, user=Depends(auth.require_perm("can_manage_roles"))):
+    roles = db.get_all_roles()
+    perms = db.get_all_permissions()
+    return render("admin/roles.html", request, {"roles": roles, "permissions": perms})
 
 @app.post("/admin/roles/create")
-async def admin_create_role(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 100: raise HTTPException(403)
-    data = await request.form()
-    name = data.get("name", "").lower().replace(" ", "_")
-    display_name = data.get("display_name", "")
-    color = data.get("color", "#6C63FF")
-    icon = data.get("icon", "👤")
-    level = int(data.get("level", 10))
-    conn = get_db()
-    conn.execute("INSERT INTO roles (name, display_name, color, icon, level) VALUES (?, ?, ?, ?, ?)", (name, display_name, color, icon, level))
-    role_id = conn.execute("SELECT id FROM roles WHERE name=?", (name,)).fetchone()[0]
-    perms = data.getlist("permissions")
-    for p in perms:
-        prow = conn.execute("SELECT id FROM permissions WHERE name=?", (p,)).fetchone()
-        if prow: conn.execute("INSERT OR IGNORE INTO role_permissions VALUES (?, ?)", (role_id, prow[0]))
-    conn.commit(); conn.close()
-    log_action(user["id"], "create_role", "role", role_id, display_name)
+async def admin_create_role(request: Request, user=Depends(auth.require_perm("can_manage_roles")),
+    name: str = Form(...), display_name: str = Form(...), color: str = Form(...), description: str = Form(default="")):
+    db.create_role(name, display_name, color, description)
+    db.add_audit_log(user["id"], user["username"], "CREATE_ROLE", target=name)
     return RedirectResponse("/admin/roles", status_code=302)
 
-@app.post("/admin/roles/{rid}/delete")
-async def admin_delete_role(rid: int, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 100: raise HTTPException(403)
-    protected = ["super_admin", "admin", "moderator", "user"]
-    conn = get_db()
-    role = conn.execute("SELECT name FROM roles WHERE id=?", (rid,)).fetchone()
-    if role and role["name"] in protected: raise HTTPException(400, "Rôle protégé")
-    conn.execute("DELETE FROM roles WHERE id=?", (rid,))
-    conn.commit(); conn.close()
-    log_action(user["id"], "delete_role", "role", rid)
+@app.post("/admin/roles/{role_id}/permissions")
+async def admin_update_role_perms(request: Request, role_id: int, user=Depends(auth.require_perm("can_manage_roles"))):
+    form = await request.form()
+    perms = form.getlist("permissions")
+    db.update_role_permissions(role_id, perms)
+    db.add_audit_log(user["id"], user["username"], "UPDATE_ROLE_PERMS", target=str(role_id))
     return RedirectResponse("/admin/roles", status_code=302)
 
 @app.get("/admin/logs", response_class=HTMLResponse)
-async def admin_logs(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 50: raise HTTPException(403)
-    page = int(request.query_params.get("page", 1))
-    per = 50
-    conn = get_db()
-    total = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0]
-    logs = conn.execute("""
-        SELECT a.*, u.username, u.display_name FROM audit_logs a
-        LEFT JOIN users u ON a.user_id=u.id
-        ORDER BY a.created_at DESC LIMIT ? OFFSET ?
-    """, (per, (page-1)*per)).fetchall()
-    conn.close()
-    return tmpl("admin/logs.html", request, user, logs=logs, page=page, total=total, per=per)
+async def admin_logs(request: Request, user=Depends(auth.require_perm("can_view_logs")),
+    page: int = 1, search: str = ""):
+    logs, total = db.get_audit_logs(page=page, search=search)
+    pages = max(1, -(-total // 50))
+    return render("admin/logs.html", request, {"logs": logs, "total": total, "page": page, "pages": pages, "search": search})
 
 @app.get("/admin/settings", response_class=HTMLResponse)
-async def admin_settings(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 80: raise HTTPException(403)
-    conn = get_db()
-    settings_rows = conn.execute("SELECT * FROM system_settings ORDER BY key").fetchall()
-    conn.close()
-    return tmpl("admin/settings.html", request, user, settings_rows=settings_rows)
+async def admin_settings(request: Request, user=Depends(auth.require_perm("can_change_settings"))):
+    s = db.get_all_settings()
+    return render("admin/settings.html", request, {"settings": s})
 
 @app.post("/admin/settings")
-async def admin_settings_save(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 80: raise HTTPException(403)
-    data = await request.form()
-    for key, value in data.items():
-        set_setting(key, value)
-    log_action(user["id"], "update_settings")
+async def admin_save_settings(request: Request, user=Depends(auth.require_perm("can_change_settings"))):
+    form = await request.form()
+    for key, value in form.items():
+        db.set_setting(key, value)
+    db.add_audit_log(user["id"], user["username"], "UPDATE_SETTINGS")
     return RedirectResponse("/admin/settings?success=1", status_code=302)
 
-@app.get("/admin/create-user", response_class=HTMLResponse)
-async def admin_create_user_page(request: Request, session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 80: raise HTTPException(403)
-    conn = get_db()
-    roles = conn.execute("SELECT * FROM roles ORDER BY level DESC").fetchall()
-    conn.close()
-    return tmpl("admin/create_user.html", request, user, roles=roles)
+# ============================================================
+# API ROUTES
+# ============================================================
 
-@app.post("/admin/create-user")
-async def admin_create_user_post(request: Request,
-    username: str = Form(...), email: str = Form(...),
-    display_name: str = Form(...), password: str = Form(...),
-    role_id: int = Form(...),
-    mail_address: str = Form(default=""), mail_password: str = Form(default=""),
-    imap_host: str = Form(default=""), smtp_host: str = Form(default=""),
-    session: Optional[str] = Cookie(default=None)):
-    user = get_current_user(session)
-    if not user or user["role_level"] < 80: raise HTTPException(403)
-    conn = get_db()
-    conn.execute("""
-        INSERT INTO users (username, email, display_name, password_hash, role_id,
-            mail_address, mail_password, imap_host, smtp_host)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (username, email, display_name, hash_password(password), role_id,
-          mail_address, mail_password, imap_host, smtp_host))
-    conn.commit()
-    new_uid = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()[0]
-    conn.close()
-    log_action(user["id"], "create_user", "user", new_uid, username)
-    return RedirectResponse("/admin/users", status_code=302)
+def get_mail_client(user):
+    ec = EmailClient(
+        imap_host=user.get("imap_host") or settings.IMAP_HOST,
+        imap_port=user.get("imap_port") or settings.IMAP_PORT,
+        smtp_host=user.get("smtp_host") or settings.SMTP_HOST,
+        smtp_port=user.get("smtp_port") or settings.SMTP_PORT,
+        email_address=user.get("email"),
+        email_password=user.get("mail_password") or settings.EMAIL_PASSWORD,
+    )
+    return ec
+
+@app.get("/api/folders")
+async def api_folders(user=Depends(auth.require_auth)):
+    return {"folders": get_mail_client(user).get_folders()}
+
+@app.get("/api/mails")
+async def api_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20, user=Depends(auth.require_auth)):
+    return get_mail_client(user).get_mails(folder=folder, page=page, per_page=per_page)
+
+@app.get("/api/mail/{uid}")
+async def api_mail(uid: int, folder: str = "INBOX", user=Depends(auth.require_auth)):
+    return get_mail_client(user).get_mail(uid=uid, folder=folder)
+
+@app.post("/api/send")
+async def api_send(request: Request, user=Depends(auth.require_auth)):
+    if not db.user_has_perm(user["id"], "can_send_mail"):
+        raise HTTPException(403)
+    data = await request.json()
+    result = get_mail_client(user).send_mail(to=data.get("to"), subject=data.get("subject"), body=data.get("body"), html=data.get("html", False))
+    if result.get("success"):
+        db.add_audit_log(user["id"], user["username"], "SEND_MAIL", target=data.get("to"))
+    return result
+
+@app.post("/api/mail/{uid}/delete")
+async def api_delete(uid: int, folder: str = "INBOX", user=Depends(auth.require_auth)):
+    if not db.user_has_perm(user["id"], "can_delete_mail"):
+        raise HTTPException(403)
+    return get_mail_client(user).delete_mail(uid=uid, folder=folder)
+
+@app.get("/api/stats")
+async def api_stats(user=Depends(auth.require_auth)):
+    return get_mail_client(user).get_stats()
+
+@app.get("/api/admin/stats")
+async def api_admin_stats(user=Depends(auth.require_perm("can_view_stats"))):
+    return db.get_global_stats()
 
 @app.get("/health")
 async def health():
