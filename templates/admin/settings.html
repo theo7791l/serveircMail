@@ -62,6 +62,30 @@
     </div>
   </div>
 
+  <!-- Domaine mail -->
+  <div class="card">
+    <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
+      <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#f472b6,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,0.3);flex-shrink:0;">
+        <i class="fa fa-at"></i>
+      </div>
+      <div>
+        <div style="font-size:15px;font-weight:700;color:var(--text);">Domaine des alias mail</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Domaine proposé à l'inscription pour les adresses perso</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="form-group">
+        <label class="form-label"><i class="fa fa-globe"></i> Domaine mail</label>
+        <input class="form-input" name="mail_domain" value="{{ settings.get('mail_domain','') }}" placeholder="youtube.serveirc.com" />
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> À l'inscription, les users choisiront leur alias : <strong>prenom@youtube.serveirc.com</strong></div>
+      </div>
+      <div style="background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.25);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:flex-start;">
+        <i class="fa fa-circle-info" style="color:#a78bfa;margin-top:1px;"></i>
+        <span>Ce domaine doit être configuré avec ImprovMX (alias <code>*</code>) pour que les mails soient redirigés vers ta boîte Zoho.</span>
+      </div>
+    </div>
+  </div>
+
   <!-- Serveur Mail Global -->
   <div class="card">
     <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
@@ -102,19 +126,19 @@
       <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:4px;">
         <div style="font-size:12px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:12px;">Authentification globale</div>
         <div class="form-group">
-          <label class="form-label"><i class="fa fa-at"></i> Adresse mail / Nom d'utilisateur IMAP</label>
-          <input class="form-input" name="global_imap_user" value="{{ settings.get('global_imap_user','') }}" placeholder="contact@youtube.serveirc.com" />
-          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Utiliser l'adresse mail complète (ex: theo7791l@zohomail.eu)</div>
+          <label class="form-label"><i class="fa fa-at"></i> Nom d'utilisateur IMAP (adresse Zoho)</label>
+          <input class="form-input" name="global_imap_user" value="{{ settings.get('global_imap_user','') }}" placeholder="theo7791l@zohomail.eu" />
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Mettre le compte Zoho réel, pas l'alias (ex: <strong>theo7791l@zohomail.eu</strong>)</div>
         </div>
         <div class="form-group">
           <label class="form-label"><i class="fa fa-key"></i> Mot de passe mail global</label>
           <div style="position:relative;display:flex;align-items:center;">
-            <input class="form-input" style="padding-right:48px;" type="password" name="global_mail_password" id="globalPwd" value="{{ settings.get('global_mail_password','') }}" placeholder="Mot de passe de la boîte mail" />
+            <input class="form-input" style="padding-right:48px;" type="password" name="global_mail_password" id="globalPwd" value="{{ settings.get('global_mail_password','') }}" placeholder="Mot de passe Zoho Mail" />
             <button type="button" onclick="toggleGlobalPwd()" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;">
               <i class="fa fa-eye" id="globalPwdEye"></i>
             </button>
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Pour Zoho : ton mot de passe Zoho Mail. Pour Gmail : utilise un App Password.</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Ton mot de passe Zoho Mail. Pour Gmail : utilise un App Password.</div>
         </div>
       </div>
       <div style="background:rgba(62,198,224,0.06);border:1px solid rgba(62,198,224,0.2);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:flex-start;">
