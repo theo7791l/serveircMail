@@ -102,17 +102,16 @@ async def register(request: Request,
     ip = auth.get_client_ip(request)
     code = db.create_pending_user(username, display_name, email, password, mail_alias)
 
-    # Send verification email — From: noreply@mail_domain via Gmail SMTP
     mail_domain = db.get_setting("mail_domain", "")
     sender = {"mail_alias": f"noreply@{mail_domain}" if mail_domain else "", "email": ""}
     body = (
         f"Bonjour {display_name},\n\n"
-        f"Votre code de vérification pour activer votre compte serveircMail est :\n\n"
+        f"Votre code de v\u00e9rification pour activer votre compte serveircMail est :\n\n"
         f"    {code}\n\n"
         f"Ce code expire dans 15 minutes.\n\n"
-        f"Si vous n'avez pas demandé cette inscription, ignorez cet email."
+        f"Si vous n'avez pas demand\u00e9 cette inscription, ignorez cet email."
     )
-    email_client.send_mail(sender, to=email, subject="[serveircMail] Code de vérification", body=body)
+    email_client.send_mail(sender, to=email, subject="[serveircMail] Code de v\u00e9rification", body=body)
     db.add_audit_log(None, username, "REGISTER_PENDING", ip=ip, details=f"alias={mail_alias}")
     return render("verify.html", request, {"email": email, "error": ""})
 
@@ -320,7 +319,6 @@ async def api_folders(user=Depends(auth.require_auth)):
 @app.get("/api/mails")
 async def api_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20, user=Depends(auth.require_auth)):
     result = email_client.get_mails(user, folder=folder, page=page, per_page=per_page)
-    # Filter: only show mails addressed to this user's alias
     alias = (user.get("mail_alias") or user.get("email", "")).lower()
     if alias and result.get("mails"):
         result["mails"] = [
@@ -335,7 +333,7 @@ async def api_mail(uid: int, folder: str = "INBOX", user=Depends(auth.require_au
     alias = (user.get("mail_alias") or user.get("email", "")).lower()
     if alias and "to" in mail:
         if alias not in mail["to"].lower():
-            raise HTTPException(403, detail="Ce mail ne vous est pas adressé")
+            raise HTTPException(403, detail="Ce mail ne vous est pas adress\u00e9")
     return mail
 
 @app.post("/api/send")
@@ -358,20 +356,44 @@ async def api_delete(uid: int, folder: str = "INBOX", user=Depends(auth.require_
 @app.get("/api/moderation/mails")
 async def api_moderation_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20,
     user=Depends(auth.require_perm("can_view_all_mails"))):
-    # Admin view: no alias filtering, uses global account
     admin_user = {"mail_alias": "", "email": db.get_setting("global_imap_user", "")}
     return email_client.get_mails(admin_user, folder=folder, page=page, per_page=per_page)
 
-@app.post("/api/admin/test-mail-connection")
-async def api_test_mail(user=Depends(auth.require_perm("can_change_settings"))):
+@app.post("/api/admin/test-imap-connection")
+async def api_test_imap(user=Depends(auth.require_perm("can_change_settings"))):
     host = db.get_setting("global_imap_host", "")
     port = int(db.get_setting("global_imap_port", "993"))
     mail_user = db.get_setting("global_imap_user", "")
     mail_pass = db.get_setting("global_mail_password", "")
     if not host or not mail_user or not mail_pass:
-        return JSONResponse({"success": False, "error": "Paramètres IMAP incomplets dans les settings"})
+        return JSONResponse({"success": False, "error": "Param\u00e8tres IMAP incomplets"})
     ok, result = test_imap_connection(host, port, mail_user, mail_pass)
     return JSONResponse({"success": ok, "mailbox": result if ok else "", "error": result if not ok else ""})
+
+# Ancien endpoint conserve pour compatibilite
+@app.post("/api/admin/test-mail-connection")
+async def api_test_mail_compat(user=Depends(auth.require_perm("can_change_settings"))):
+    return await api_test_imap(user)
+
+@app.post("/api/admin/test-smtp-connection")
+async def api_test_smtp(user=Depends(auth.require_perm("can_change_settings"))):
+    import smtplib
+    host = db.get_setting("global_smtp_host", "live.smtp.mailtrap.io")
+    port = int(db.get_setting("global_smtp_port", "587"))
+    smtp_user = db.get_setting("global_smtp_user", "api")
+    smtp_pass = db.get_setting("global_smtp_password", "")
+    if not smtp_pass:
+        return JSONResponse({"success": False, "error": "Cl\u00e9 API SMTP (password) manquante dans les param\u00e8tres"})
+    try:
+        server = smtplib.SMTP(host, port, timeout=10)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(smtp_user, smtp_pass)
+        server.quit()
+        return JSONResponse({"success": True})
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)})
 
 @app.get("/api/stats")
 async def api_stats(user=Depends(auth.require_auth)):
