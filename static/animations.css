@@ -1,0 +1,259 @@
+/* ============================================================
+   ULTRA SEXY ANIMATIONS - serveircMail
+   ============================================================ */
+
+/* Entrée de page */
+.page-enter {
+  animation: pageEnter 0.5s cubic-bezier(0.4,0,0.2,1) both;
+}
+
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Stagger enfants */
+.stagger > * {
+  animation: staggerItem 0.4s ease both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger > *:nth-child(2) { animation-delay: 0.10s; }
+.stagger > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger > *:nth-child(4) { animation-delay: 0.20s; }
+.stagger > *:nth-child(5) { animation-delay: 0.25s; }
+.stagger > *:nth-child(6) { animation-delay: 0.30s; }
+.stagger > *:nth-child(7) { animation-delay: 0.35s; }
+.stagger > *:nth-child(8) { animation-delay: 0.40s; }
+.stagger > *:nth-child(n+9) { animation-delay: 0.45s; }
+
+@keyframes staggerItem {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Glow pulsant */
+.glow-pulse {
+  animation: glowPulse 2.5s ease-in-out infinite;
+}
+
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(108,99,255,0.2); }
+  50% { box-shadow: 0 0 30px rgba(108,99,255,0.5), 0 0 60px rgba(108,99,255,0.2); }
+}
+
+/* Rotation fluide */
+.spin-slow { animation: spin 8s linear infinite; }
+.spin-fast { animation: spin 1s linear infinite; }
+
+/* Gradient animé text */
+.text-gradient-animated {
+  background: linear-gradient(135deg, #6C63FF, #3EC6E0, #FF6584, #6C63FF);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: gradientShift 4s linear infinite;
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Slide in from left */
+.slide-in-left {
+  animation: slideInLeft 0.4s cubic-bezier(0.4,0,0.2,1) both;
+}
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Slide in from right */
+.slide-in-right {
+  animation: slideInRight 0.4s cubic-bezier(0.4,0,0.2,1) both;
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Fade scale in */
+.fade-scale-in {
+  animation: fadeScaleIn 0.4s cubic-bezier(0.4,0,0.2,1) both;
+}
+@keyframes fadeScaleIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Neon border */
+.neon-border {
+  position: relative;
+}
+.neon-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #6C63FF, #3EC6E0, #FF6584);
+  background-size: 300% 300%;
+  animation: neonBorderRotate 3s linear infinite;
+  z-index: -1;
+  opacity: 0.6;
+}
+@keyframes neonBorderRotate {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Typing cursor */
+.typing::after {
+  content: '|';
+  animation: blink 1s step-end infinite;
+  color: var(--primary);
+}
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* Ripple effect */
+.ripple-container {
+  position: relative;
+  overflow: hidden;
+}
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  transform: scale(0);
+  background: rgba(255,255,255,0.15);
+  animation: rippleAnim 0.6s linear;
+  pointer-events: none;
+}
+@keyframes rippleAnim {
+  to { transform: scale(4); opacity: 0; }
+}
+
+/* Floating orbs background */
+.orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(60px);
+  pointer-events: none;
+  z-index: 0;
+  animation: orbFloat 20s ease-in-out infinite;
+}
+.orb-1 {
+  width: 400px; height: 400px;
+  top: -100px; left: -100px;
+  background: rgba(108,99,255,0.08);
+  animation-delay: 0s;
+}
+.orb-2 {
+  width: 300px; height: 300px;
+  top: 50%; right: -100px;
+  background: rgba(62,198,224,0.06);
+  animation-delay: -7s;
+}
+.orb-3 {
+  width: 350px; height: 350px;
+  bottom: -100px; left: 40%;
+  background: rgba(255,101,132,0.05);
+  animation-delay: -14s;
+}
+@keyframes orbFloat {
+  0%, 100% { transform: translate(0,0) scale(1); }
+  25% { transform: translate(30px,-20px) scale(1.05); }
+  50% { transform: translate(-20px,30px) scale(0.95); }
+  75% { transform: translate(20px,20px) scale(1.03); }
+}
+
+/* Progress bar animated */
+.progress-bar {
+  height: 4px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+  border-radius: 4px;
+  transition: width 1s cubic-bezier(0.4,0,0.2,1);
+  position: relative;
+  overflow: hidden;
+}
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%; width: 100%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  animation: progressShimmer 1.5s infinite;
+}
+@keyframes progressShimmer {
+  to { left: 100%; }
+}
+
+/* Card glow on focus */
+.card-interactive {
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
+}
+.card-interactive:hover {
+  transform: translateY(-4px) scale(1.01);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 40px rgba(108,99,255,0.15);
+}
+
+/* Notification pop */
+.notification-pop {
+  animation: notifPop 0.5s cubic-bezier(0.68,-0.55,0.265,1.55) both;
+}
+@keyframes notifPop {
+  from { opacity: 0; transform: scale(0.5) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Gradient card backgrounds */
+.grad-purple { background: linear-gradient(135deg, rgba(108,99,255,0.15), rgba(108,99,255,0.05)); border-color: rgba(108,99,255,0.25) !important; }
+.grad-cyan { background: linear-gradient(135deg, rgba(62,198,224,0.12), rgba(62,198,224,0.04)); border-color: rgba(62,198,224,0.2) !important; }
+.grad-pink { background: linear-gradient(135deg, rgba(255,101,132,0.12), rgba(255,101,132,0.04)); border-color: rgba(255,101,132,0.2) !important; }
+.grad-green { background: linear-gradient(135deg, rgba(74,222,128,0.12), rgba(74,222,128,0.04)); border-color: rgba(74,222,128,0.2) !important; }
+
+/* Hover lift */
+.hover-lift { transition: transform 0.3s ease, box-shadow 0.3s ease; }
+.hover-lift:hover { transform: translateY(-3px); box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
+
+/* Animated underline */
+.animated-link {
+  position: relative;
+  text-decoration: none;
+  color: var(--primary-light);
+}
+.animated-link::after {
+  content: '';
+  position: absolute;
+  bottom: -2px; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.3s ease;
+}
+.animated-link:hover::after { transform: scaleX(1); }
+
+/* Number counter animation */
+.count-up {
+  display: inline-block;
+  animation: countUp 0.8s cubic-bezier(0.4,0,0.2,1) both;
+}
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
