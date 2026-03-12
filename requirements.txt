@@ -7,3 +7,4 @@ imaplib2==3.6
 email-validator==2.2.0
 python-dotenv==1.0.1
 httpx==0.27.2
+pydantic-settings==2.4.0
