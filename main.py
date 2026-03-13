@@ -380,6 +380,17 @@ async def admin_save_settings(request: Request, user=Depends(auth.require_perm("
     return RedirectResponse("/admin/settings?success=1", status_code=302)
 
 # ============================================================
+# API ADMIN — test SMTP
+# ============================================================
+
+@app.post("/api/admin/test-smtp-connection")
+async def api_test_smtp(request: Request, user=Depends(auth.require_perm("can_change_settings"))):
+    data = await request.json()
+    smtp_pass = data.get("smtp_pass") or db.get_setting("global_smtp_password", "")
+    ok, msg = email_client.test_smtp_connection(smtp_pass)
+    return JSONResponse({"success": ok, "message": msg})
+
+# ============================================================
 # API ROUTES
 # ============================================================
 
@@ -463,6 +474,24 @@ async def api_delete(uid: int, user=Depends(auth.require_auth)):
 async def api_my_addresses(user=Depends(auth.require_auth)):
     return {"addresses": db.get_user_addresses(user["id"])}
 
+@app.get("/api/stats")
+async def api_stats(user=Depends(auth.require_auth)):
+    from database import get_inbound_mails_multi, get_all_addresses_for_user
+    addresses = get_all_addresses_for_user(user["id"])
+    unread = 0
+    if addresses:
+        import sqlite3
+        conn = db.get_conn()
+        placeholders = ",".join("?" * len(addresses))
+        lower_addrs = [a.lower() for a in addresses]
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM inbound_mails WHERE mail_to IN ({placeholders}) AND seen=0 AND folder='INBOX'",
+            lower_addrs
+        ).fetchone()
+        conn.close()
+        unread = row[0] if row else 0
+    return {"unread": unread}
+
 # ============================================================
 # API MODÉRATION
 # ============================================================
@@ -486,3 +515,11 @@ async def api_moderation_mail(uid: int, user=Depends(auth.require_perm("can_view
 async def api_moderation_delete(uid: int, user=Depends(auth.require_perm("can_view_all_mails"))):
     ok = db.delete_inbound_mail(uid)
     return JSONResponse({"success": ok})
+
+# ============================================================
+# ENTRYPOINT
+# ============================================================
+
+if __name__ == "__main__":
+    port = int(db.get_setting("app_port", os.getenv("PORT", "15431")))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
