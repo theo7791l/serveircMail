@@ -2,25 +2,43 @@
 {% block title %}Rédiger — {{ site_name }}{% endblock %}
 {% block page_title %}<i class="fa fa-pen-to-square" style="color:var(--primary)"></i> Nouveau message{% endblock %}
 {% block content %}
-<div style="max-width:860px;margin:0 auto;">
+<div style="max-width:860px;margin:0 auto">
   <div class="card">
-    <div class="card-body" style="padding:28px 32px;">
+    <div class="card-body" style="padding:28px 32px">
 
-      <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;">
-        <i class="fa fa-circle-info" style="color:var(--text-muted);font-size:13px;"></i>
-        <span style="font-size:13px;color:var(--text-muted);">De : <strong style="color:var(--text);">{{ email }}</strong></span>
+      <!-- Expéditeur -->
+      <div class="form-group">
+        <label class="form-label"><i class="fa fa-user"></i> Expéditeur</label>
+        {% if addresses|length > 1 %}
+        <select class="form-select" id="fromSelect">
+          {% for addr in addresses %}
+          <option value="{{ addr.address }}" {% if addr.address == primary_address %}selected{% endif %}>
+            {{ addr.address }}{% if addr.is_primary %} ★{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        {% else %}
+        <div style="padding:10px 14px;background:var(--bg-hover);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;color:var(--text)">
+          <i class="fa fa-at" style="color:var(--primary)"></i>
+          <strong>{{ primary_address or (addresses[0].address if addresses else '') }}</strong>
+        </div>
+        <input type="hidden" id="fromSelect" value="{{ primary_address or (addresses[0].address if addresses else '') }}" />
+        {% endif %}
       </div>
 
+      <!-- Destinataire -->
       <div class="form-group">
         <label class="form-label"><i class="fa fa-at"></i> Destinataire</label>
         <input class="form-input" type="email" id="toInput" value="{{ reply_to }}" placeholder="destinataire@exemple.com" />
       </div>
 
+      <!-- Sujet -->
       <div class="form-group">
         <label class="form-label"><i class="fa fa-tag"></i> Sujet</label>
         <input class="form-input" type="text" id="subjectInput" value="{{ subject }}" placeholder="Objet du message" />
       </div>
 
+      <!-- Corps -->
       <div class="form-group">
         <label class="form-label"><i class="fa fa-align-left"></i> Message</label>
         <div class="compose-toolbar">
@@ -28,32 +46,40 @@
           <button class="toolbar-btn" type="button" onclick="fmt('italic')" title="Italique"><i class="fa fa-italic"></i></button>
           <button class="toolbar-btn" type="button" onclick="fmt('underline')" title="Souligner"><i class="fa fa-underline"></i></button>
           <button class="toolbar-btn" type="button" onclick="fmt('strikeThrough')" title="Barrer"><i class="fa fa-strikethrough"></i></button>
-          <div style="width:1px;background:var(--border);margin:0 4px;"></div>
+          <div style="width:1px;background:var(--border);margin:0 4px"></div>
           <button class="toolbar-btn" type="button" onclick="fmt('insertUnorderedList')" title="Liste"><i class="fa fa-list-ul"></i></button>
           <button class="toolbar-btn" type="button" onclick="fmt('insertOrderedList')" title="Liste numérotée"><i class="fa fa-list-ol"></i></button>
-          <div style="width:1px;background:var(--border);margin:0 4px;"></div>
+          <div style="width:1px;background:var(--border);margin:0 4px"></div>
           <button class="toolbar-btn" type="button" onclick="toggleHtml()" id="htmlToggle" title="Mode HTML"><i class="fa fa-code"></i></button>
         </div>
         <div id="editorArea" contenteditable="true"
-          style="min-height:260px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:14px;outline:none;line-height:1.6;transition:var(--transition);"
+          style="min-height:260px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:14px;outline:none;line-height:1.6;transition:var(--transition)"
           onfocus="this.style.borderColor='var(--primary)';this.style.background='rgba(108,99,255,0.04)'"
           onblur="this.style.borderColor='var(--border)';this.style.background='rgba(255,255,255,0.03)'"></div>
       </div>
 
-      <div style="display:flex;gap:12px;align-items:center;">
+      <div style="display:flex;gap:12px;align-items:center">
         <button class="btn btn-primary btn-lg" id="sendBtn" onclick="sendMail()">
           <i class="fa fa-paper-plane"></i> Envoyer
         </button>
         <a href="/inbox" class="btn btn-ghost"><i class="fa fa-xmark"></i> Annuler</a>
-        <div id="sendStatus" style="display:none;font-size:13px;margin-left:8px;"></div>
+        <div id="sendStatus" style="display:none;font-size:13px;margin-left:8px"></div>
       </div>
 
     </div>
   </div>
 </div>
+
 <script>
 function fmt(cmd) { document.execCommand(cmd, false, null); }
 let htmlMode = false;
+
+function getFromAddress() {
+  const el = document.getElementById('fromSelect');
+  if (!el) return '';
+  return el.tagName === 'SELECT' ? el.value : el.value;
+}
+
 function toggleHtml() {
   const area = document.getElementById('editorArea');
   htmlMode = !htmlMode;
@@ -62,38 +88,56 @@ function toggleHtml() {
     const ta = document.createElement('textarea');
     ta.id = 'editorArea';
     ta.value = area.innerHTML;
-    ta.style = 'min-height:260px;width:100%;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:13px;font-family:"JetBrains Mono",monospace;outline:none;resize:vertical;';
+    ta.style.cssText = 'min-height:260px;width:100%;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:13px;font-family:"JetBrains Mono",monospace;outline:none;resize:vertical;box-sizing:border-box';
     area.replaceWith(ta);
   } else {
     const ta = document.getElementById('editorArea');
     const div = document.createElement('div');
     div.id = 'editorArea'; div.contentEditable = 'true';
-    div.style = 'min-height:260px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:14px;outline:none;line-height:1.6;';
-    div.innerHTML = ta.value; ta.replaceWith(div);
+    div.style.cssText = 'min-height:260px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:14px;outline:none;line-height:1.6';
+    div.innerHTML = ta.value;
+    ta.replaceWith(div);
   }
 }
+
 async function sendMail() {
-  const to = document.getElementById('toInput').value;
-  const subject = document.getElementById('subjectInput').value;
-  const body = htmlMode ? document.getElementById('editorArea').value : document.getElementById('editorArea').innerHTML;
+  const to = document.getElementById('toInput').value.trim();
+  const subject = document.getElementById('subjectInput').value.trim();
+  const area = document.getElementById('editorArea');
+  const body = htmlMode ? area.value : area.innerHTML;
+  const from_address = getFromAddress();
+
   if (!to) { showStatus('Destinataire requis', 'error'); return; }
+  if (!subject) { showStatus('Sujet requis', 'error'); return; }
+
   const btn = document.getElementById('sendBtn');
-  btn.disabled = true; btn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Envoi en cours...';
-  const res = await fetch('/api/send', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({to, subject, body, html: htmlMode}) });
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Envoi en cours...';
+
+  const res = await fetch('/api/send', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ to, subject, body, html: htmlMode, from_address })
+  });
   const data = await res.json();
+
   if (data.success) {
     showStatus('Mail envoyé !', 'success');
-    setTimeout(() => window.location='/inbox', 1500);
+    setTimeout(() => window.location = '/inbox?folder=Sent', 1500);
   } else {
     showStatus(data.error || 'Erreur inconnue', 'error');
-    btn.disabled = false; btn.innerHTML = '<i class="fa fa-paper-plane"></i> Envoyer';
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa fa-paper-plane"></i> Envoyer';
   }
 }
+
 function showStatus(msg, type) {
   const el = document.getElementById('sendStatus');
-  el.style.display = 'flex'; el.style.alignItems = 'center'; el.style.gap = '6px';
+  el.style.display = 'flex';
+  el.style.alignItems = 'center';
+  el.style.gap = '6px';
   el.style.color = type === 'success' ? 'var(--accent3)' : 'var(--accent2)';
-  el.innerHTML = `<i class="fa fa-${type==='success'?'check-circle':'circle-xmark'}"></i> ${msg}`;
+  el.innerHTML = `<i class="fa fa-${type === 'success' ? 'check-circle' : 'circle-xmark'}"></i> ${msg}`;
 }
 </script>
 {% endblock %}

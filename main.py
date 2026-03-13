@@ -107,18 +107,17 @@ async def register(request: Request,
     code = db.create_pending_user(username, display_name, email, password, mail_alias)
 
     site_name = db.get_setting("site_name", "Awlor")
-    # Pas de user réel ici, on passe None — l'adresse expéditrice sera noreply@mail_domain
     body = (
         f"Bonjour {display_name},\n\n"
-        f"Votre code de vérification pour activer votre compte {site_name} est :\n\n"
+        f"Votre code de v\u00e9rification pour activer votre compte {site_name} est :\n\n"
         f"    {code}\n\n"
         f"Ce code expire dans 15 minutes.\n\n"
-        f"L'équipe {site_name}"
+        f"L'\u00e9quipe {site_name}"
     )
     email_client.send_mail(
         user=None,
         to=email,
-        subject=f"[{site_name}] Code de vérification",
+        subject=f"[{site_name}] Code de v\u00e9rification",
         body=body,
         from_address=f"noreply@{mail_domain}"
     )
@@ -164,7 +163,13 @@ async def inbox(request: Request, user=Depends(auth.require_auth), page: int = 1
 @app.get("/compose", response_class=HTMLResponse)
 async def compose(request: Request, user=Depends(auth.require_auth), reply_to: str = "", subject: str = ""):
     addresses = db.get_user_addresses(user["id"])
-    return render("compose.html", request, {"reply_to": reply_to, "subject": subject, "addresses": addresses})
+    primary = db.get_primary_address(user["id"])
+    return render("compose.html", request, {
+        "reply_to": reply_to,
+        "subject": subject,
+        "addresses": addresses,
+        "primary_address": primary,
+    })
 
 @app.get("/mail/{uid}", response_class=HTMLResponse)
 async def read_mail(request: Request, uid: int, folder: str = "INBOX", user=Depends(auth.require_auth)):
@@ -302,10 +307,6 @@ async def admin_unban(request: Request, uid: int, user=Depends(auth.require_perm
     db.add_audit_log(user["id"], user["username"], "UNBAN_USER", target=str(uid))
     return JSONResponse({"success": True})
 
-# ============================================================
-# ADMIN — GESTION ADRESSES MAIL
-# ============================================================
-
 @app.post("/admin/users/{uid}/addresses/add")
 async def admin_add_address(request: Request, uid: int,
     user=Depends(auth.require_perm("can_manage_mail_addresses")),
@@ -396,7 +397,8 @@ async def api_mail(uid: int, user=Depends(auth.require_auth)):
     if "error" in mail:
         raise HTTPException(404, detail=mail["error"])
     user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
-    if mail.get("to", "").lower() not in user_addrs:
+    # Pour les mails Sent, le champ mail_to = adresse de l'expéditeur
+    if mail.get("to", "").lower() not in user_addrs and mail.get("from", "").lower() not in user_addrs:
         raise HTTPException(403, detail="Accès refusé")
     return mail
 
@@ -409,11 +411,11 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
     subject = (data.get("subject") or "").strip()
     body = (data.get("body") or "").strip()
     from_address = (data.get("from_address") or "").strip()
+    is_html = data.get("html", False)
 
     if not to:
         return JSONResponse({"success": False, "error": "Destinataire manquant"})
 
-    # Vérifie que l'adresse expéditrice fournie appartient bien au user
     if from_address:
         user_addrs = db.get_all_addresses_for_user(user["id"])
         if from_address.lower() not in [a.lower() for a in user_addrs]:
@@ -424,11 +426,27 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
         to=to,
         subject=subject,
         body=body,
-        html=data.get("html", False),
+        html=is_html,
         from_address=from_address or None
     )
+
     if ok:
+        # Résoudre l'adresse expéditrice réellement utilisée
+        sent_from = from_address or db.get_primary_address(user["id"]) or f"noreply@{db.get_setting('mail_domain', 'awlor.online')}"
+        # Sauvegarder dans le dossier Sent (mail_to = adresse expéditrice pour retrouver via get_inbound_mails)
+        body_html = body if is_html else ""
+        body_text = "" if is_html else body
+        db.save_inbound_mail(
+            mail_to=sent_from,
+            mail_from=sent_from,
+            subject=subject,
+            body_html=body_html,
+            body_text=body_text,
+            headers=json.dumps({"to": to}),
+            folder="Sent"
+        )
         db.add_audit_log(user["id"], user["username"], "SEND_MAIL", target=to)
+
     return {"success": ok, "error": err}
 
 @app.post("/api/mail/{uid}/delete")
