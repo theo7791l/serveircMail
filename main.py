@@ -83,7 +83,7 @@ async def register(request: Request,
     mail_prefix: str = Form(...)):
 
     if db.get_setting("allow_registration", "1") != "1":
-        return RedirectResponse("/login?error=registration_closed", status_code=302)
+        return RedirectResponse("/register?error=registration_closed", status_code=302)
 
     mail_domain = db.get_setting("mail_domain", "")
     if not mail_domain:
@@ -109,15 +109,15 @@ async def register(request: Request,
     site_name = db.get_setting("site_name", "Awlor")
     body = (
         f"Bonjour {display_name},\n\n"
-        f"Votre code de v\u00e9rification pour activer votre compte {site_name} est :\n\n"
+        f"Votre code de vérification pour activer votre compte {site_name} est :\n\n"
         f"    {code}\n\n"
         f"Ce code expire dans 15 minutes.\n\n"
-        f"L'\u00e9quipe {site_name}"
+        f"L'équipe {site_name}"
     )
     email_client.send_mail(
         user=None,
         to=email,
-        subject=f"[{site_name}] Code de v\u00e9rification",
+        subject=f"[{site_name}] Code de vérification",
         body=body,
         from_address=f"noreply@{mail_domain}"
     )
@@ -150,6 +150,22 @@ async def logout(request: Request):
     resp = RedirectResponse("/login")
     resp.delete_cookie("session")
     return resp
+
+# ============================================================
+# PAGES LÉGALES (RGPD)
+# ============================================================
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_page(request: Request):
+    return templates.TemplateResponse("privacy.html", {"request": request})
+
+@app.get("/cookies", response_class=HTMLResponse)
+async def cookies_page(request: Request):
+    return templates.TemplateResponse("cookies.html", {"request": request})
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_page(request: Request):
+    return templates.TemplateResponse("terms.html", {"request": request})
 
 # ============================================================
 # MAIL ROUTES
@@ -415,7 +431,7 @@ async def api_mail(uid: int, user=Depends(auth.require_auth)):
         raise HTTPException(404, detail=mail["error"])
     user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
     if mail.get("to", "").lower() not in user_addrs and mail.get("from", "").lower() not in user_addrs:
-        raise HTTPException(403, detail="Acc\u00e8s refus\u00e9")
+        raise HTTPException(403, detail="Accès refusé")
     return mail
 
 @app.post("/api/send")
@@ -435,18 +451,16 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
     if from_address:
         user_addrs = db.get_all_addresses_for_user(user["id"])
         if from_address.lower() not in [a.lower() for a in user_addrs]:
-            raise HTTPException(403, detail="Adresse exp\u00e9ditrice non autoris\u00e9e")
+            raise HTTPException(403, detail="Adresse expéditrice non autorisée")
 
     sent_from = from_address or db.get_primary_address(user["id"]) or f"noreply@{db.get_setting('mail_domain', 'awlor.online')}"
     body_html = body if is_html else ""
     body_text = "" if is_html else body
 
-    # --- Livraison interne : si le destinataire est une adresse locale, on bypass Resend ---
     to_lower = to.lower()
     is_internal = db.address_exists(to_lower)
 
     if is_internal:
-        # Déposer directement dans l'INBOX du destinataire
         db.save_inbound_mail(
             mail_to=to_lower,
             mail_from=sent_from,
@@ -458,7 +472,6 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
         )
         ok, err = True, None
     else:
-        # Envoi externe via Resend SMTP
         ok, err = email_client.send_mail(
             user=user,
             to=to,
@@ -469,7 +482,6 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
         )
 
     if ok:
-        # Sauvegarder dans Sent avec mail_to = vrai destinataire
         db.save_inbound_mail(
             mail_to=to_lower,
             mail_from=sent_from,
