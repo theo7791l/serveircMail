@@ -3,14 +3,15 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">Gestion des <span>Utilisateurs</span></h1>
-    <p class="page-subtitle">{{ total }} utilisateur{{ 's' if total != 1 }} au total</p>
+    <p class="page-subtitle">{{ total }} utilisateur{{ 's' if total != 1 }}</p>
   </div>
   <div class="flex gap-2">
+    {% if 'can_create_accounts' in user_perms %}
     <button onclick="openModal('createUserModal')" class="btn btn-primary"><i class="fa fa-user-plus"></i> Nouvel utilisateur</button>
+    {% endif %}
   </div>
 </div>
 
-<!-- Search -->
 <form method="get" class="mb-4">
   <div class="search-bar" style="max-width:420px">
     <input type="text" name="search" value="{{ search }}" placeholder="Rechercher un utilisateur..." />
@@ -18,7 +19,6 @@
   </div>
 </form>
 
-<!-- Table -->
 <div class="card">
   <div class="table-wrapper" style="border:none;border-radius:0">
     <table>
@@ -26,6 +26,7 @@
         <tr>
           <th>Utilisateur</th>
           <th>Email</th>
+          <th>Adresses mail</th>
           <th>Rôle</th>
           <th>Statut</th>
           <th>Créé le</th>
@@ -46,6 +47,18 @@
           </td>
           <td class="text-sm text-muted">{{ u.email }}</td>
           <td>
+            <div style="display:flex;flex-wrap:wrap;gap:4px;max-width:220px">
+              {% for addr in u.addresses %}
+              <span class="badge" style="background:rgba(108,99,255,0.1);border:1px solid rgba(108,99,255,0.3);color:var(--primary);font-size:11px;padding:2px 8px;border-radius:20px">
+                {{ addr.address }}
+                {% if addr.is_primary %}<i class="fa fa-star" style="color:#fbbf24;font-size:9px;margin-left:3px" title="Principale"></i>{% endif %}
+              </span>
+              {% else %}
+              <span style="color:var(--text-dim);font-size:12px"><i>Aucune adresse</i></span>
+              {% endfor %}
+            </div>
+          </td>
+          <td>
             <span class="badge badge-role" style="--role-color:{{ u.role_color or '#6C63FF' }}">{{ u.role_display or u.role_name }}</span>
           </td>
           <td>
@@ -61,6 +74,9 @@
           <td>
             <div class="flex gap-2">
               <button onclick="openEditModal({{ u|tojson }})" class="btn btn-ghost btn-sm btn-icon" title="Modifier"><i class="fa fa-pen"></i></button>
+              {% if 'can_manage_mail_addresses' in user_perms %}
+              <button onclick="openAddressModal({{ u.id }}, '{{ u.display_name|e }}', {{ u.addresses|tojson }})" class="btn btn-ghost btn-sm btn-icon" title="Gérer les adresses"><i class="fa fa-at"></i></button>
+              {% endif %}
               {% if not u.is_banned %}
                 {% if u.is_active %}
                   <button onclick="userAction({{ u.id }}, 'suspend')" class="btn btn-warning btn-sm btn-icon" title="Suspendre"><i class="fa fa-pause"></i></button>
@@ -76,23 +92,22 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-muted)">Aucun utilisateur trouvé</td></tr>
+        <tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted)">Aucun utilisateur trouvé</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
 
-<!-- Pagination -->
 {% if pages > 1 %}
 <div class="pagination">
   {% for p in range(1, pages+1) %}
-    <a href="?page={{ p }}&search={{ search }}" class="page-btn {{ 'active' if p == page }}" >{{ p }}</a>
+    <a href="?page={{ p }}&search={{ search }}" class="page-btn {{ 'active' if p == page }}">{{ p }}</a>
   {% endfor %}
 </div>
 {% endif %}
 
-<!-- Create Modal -->
+<!-- Modal Créer Utilisateur -->
 <div class="modal-overlay hidden" id="createUserModal">
   <div class="modal">
     <div class="modal-header">
@@ -104,11 +119,11 @@
         <div class="grid-2">
           <div class="form-group">
             <label class="form-label">Nom d'utilisateur</label>
-            <input class="form-input" name="username" required placeholder="ex: johndoe" />
+            <input class="form-input" name="username" required placeholder="johndoe" />
           </div>
           <div class="form-group">
             <label class="form-label">Nom affiché</label>
-            <input class="form-input" name="display_name" required placeholder="ex: John Doe" />
+            <input class="form-input" name="display_name" required placeholder="John Doe" />
           </div>
         </div>
         <div class="form-group">
@@ -128,8 +143,8 @@
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">Mot de passe mail (IMAP/SMTP)</label>
-          <input class="form-input" type="password" name="mail_password" placeholder="Optionnel" />
+          <label class="form-label"><i class="fa fa-at"></i> Adresse mail initiale <span style="color:var(--text-dim);font-size:12px">(ex: jean@{{ mail_domain }})</span></label>
+          <input class="form-input" name="mail_alias" placeholder="jean@{{ mail_domain }}" />
         </div>
       </div>
       <div class="modal-footer">
@@ -140,7 +155,7 @@
   </div>
 </div>
 
-<!-- Edit Modal -->
+<!-- Modal Modifier Utilisateur -->
 <div class="modal-overlay hidden" id="editUserModal">
   <div class="modal">
     <div class="modal-header">
@@ -159,10 +174,6 @@
             {% for r in roles %}<option value="{{ r.id }}">{{ r.display_name }}</option>{% endfor %}
           </select>
         </div>
-        <div class="form-group">
-          <label class="form-label">Nouveau mot de passe mail</label>
-          <input class="form-input" type="password" name="mail_password" placeholder="Laisser vide pour ne pas changer" />
-        </div>
         <input type="hidden" name="is_active" value="1" />
         <input type="hidden" name="is_banned" value="0" />
       </div>
@@ -174,7 +185,42 @@
   </div>
 </div>
 
-<!-- Delete Confirm -->
+<!-- Modal Gérer Adresses -->
+<div class="modal-overlay hidden" id="addressModal">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title"><i class="fa fa-at" style="color:var(--primary)"></i> Adresses mail — <span id="addrModalUsername"></span></span>
+      <button class="modal-close" onclick="closeModal('addressModal')"><i class="fa fa-xmark"></i></button>
+    </div>
+    <div class="modal-body">
+      <div id="addressList" style="margin-bottom:16px"></div>
+      <div style="border-top:1px solid var(--border);padding-top:16px">
+        <p style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px"><i class="fa fa-plus"></i> Ajouter une adresse</p>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Adresse mail</label>
+            <input class="form-input" id="newAddrInput" placeholder="jean.dupont@{{ mail_domain }}" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Label (optionnel)</label>
+            <input class="form-input" id="newAddrLabel" placeholder="ex: Pro, Perso..." />
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <input type="checkbox" id="newAddrPrimary" style="width:16px;height:16px" />
+          <label for="newAddrPrimary" style="font-size:13px;color:var(--text-muted)">Définir comme adresse principale</label>
+        </div>
+        <button onclick="addAddress()" class="btn btn-primary btn-sm"><i class="fa fa-plus"></i> Ajouter</button>
+        <span id="addrError" style="color:#ff6b6b;font-size:12px;margin-left:8px"></span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button onclick="closeModal('addressModal')" class="btn btn-ghost">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Supprimer -->
 <div class="modal-overlay hidden" id="deleteModal">
   <div class="modal" style="max-width:400px">
     <div class="modal-header">
@@ -201,24 +247,105 @@
 </style>
 
 <script>
+let currentAddrUserId = null;
+
 function openModal(id){ document.getElementById(id).classList.remove('hidden'); }
 function closeModal(id){ document.getElementById(id).classList.add('hidden'); }
+
 function openEditModal(u){
   document.getElementById('edit_display_name').value = u.display_name;
   document.getElementById('edit_role_id').value = u.role_id;
   document.getElementById('editUserForm').action = '/admin/users/' + u.id + '/update';
   openModal('editUserModal');
 }
+
 function confirmDelete(id, username){
   document.getElementById('deleteUsername').textContent = username;
   document.getElementById('deleteForm').action = '/admin/users/' + id + '/delete';
   openModal('deleteModal');
 }
+
 async function userAction(id, action){
   const res = await fetch('/admin/users/' + id + '/' + action, {method:'POST'});
   const data = await res.json();
   if(data.success) location.reload();
 }
+
+function openAddressModal(uid, username, addresses){
+  currentAddrUserId = uid;
+  document.getElementById('addrModalUsername').textContent = username;
+  document.getElementById('addrError').textContent = '';
+  document.getElementById('newAddrInput').value = '';
+  document.getElementById('newAddrLabel').value = '';
+  document.getElementById('newAddrPrimary').checked = false;
+  renderAddressList(addresses);
+  openModal('addressModal');
+}
+
+function renderAddressList(addresses){
+  const container = document.getElementById('addressList');
+  if(!addresses || addresses.length === 0){
+    container.innerHTML = '<p style="color:var(--text-dim);font-size:13px">Aucune adresse mail assignée</p>';
+    return;
+  }
+  container.innerHTML = addresses.map(a => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg-hover);border-radius:8px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <i class="fa fa-at" style="color:var(--primary);font-size:12px"></i>
+        <span style="font-size:13px;font-weight:500">${a.address}</span>
+        ${a.is_primary ? '<span style="background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.4);color:#fbbf24;font-size:10px;padding:1px 7px;border-radius:20px"><i class="fa fa-star"></i> Principale</span>' : ''}
+        ${a.label ? '<span style="color:var(--text-dim);font-size:11px">(${a.label})</span>' : ''}
+      </div>
+      <div style="display:flex;gap:6px">
+        ${!a.is_primary ? `<button onclick="setPrimary(${a.id})" class="btn btn-ghost btn-sm" title="Définir comme principale"><i class="fa fa-star"></i></button>` : ''}
+        <button onclick="deleteAddress(${a.id})" class="btn btn-danger btn-sm btn-icon" title="Supprimer"><i class="fa fa-trash"></i></button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function addAddress(){
+  const address = document.getElementById('newAddrInput').value.trim();
+  const label = document.getElementById('newAddrLabel').value.trim();
+  const is_primary = document.getElementById('newAddrPrimary').checked ? 1 : 0;
+  document.getElementById('addrError').textContent = '';
+  if(!address){ document.getElementById('addrError').textContent = 'Adresse requise'; return; }
+  const fd = new FormData();
+  fd.append('address', address); fd.append('label', label); fd.append('is_primary', is_primary);
+  const res = await fetch('/admin/users/' + currentAddrUserId + '/addresses/add', {method:'POST', body:fd});
+  const data = await res.json();
+  if(!data.success){ document.getElementById('addrError').textContent = data.error || 'Erreur'; return; }
+  const r2 = await fetch('/api/admin/users/' + currentAddrUserId + '/addresses');
+  const d2 = await r2.json();
+  renderAddressList(d2.addresses);
+  document.getElementById('newAddrInput').value = '';
+  document.getElementById('newAddrLabel').value = '';
+}
+
+async function deleteAddress(addrId){
+  if(!confirm('Supprimer cette adresse ?')) return;
+  const fd = new FormData();
+  const res = await fetch('/admin/addresses/' + addrId + '/delete', {method:'POST', body:fd});
+  const data = await res.json();
+  if(data.success){
+    const r2 = await fetch('/api/admin/users/' + currentAddrUserId + '/addresses');
+    const d2 = await r2.json();
+    renderAddressList(d2.addresses);
+  }
+}
+
+async function setPrimary(addrId){
+  const fd = new FormData();
+  fd.append('uid', currentAddrUserId);
+  const res = await fetch('/admin/addresses/' + addrId + '/set-primary', {method:'POST', body:fd});
+  const data = await res.json();
+  if(data.success){
+    const r2 = await fetch('/api/admin/users/' + currentAddrUserId + '/addresses');
+    const d2 = await r2.json();
+    renderAddressList(d2.addresses);
+  }
+}
+
 document.querySelectorAll('.modal-overlay').forEach(o=>{
   o.addEventListener('click', e=>{ if(e.target===o) o.classList.add('hidden'); });
 });

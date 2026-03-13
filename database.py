@@ -8,33 +8,23 @@ DB_PATH = os.getenv("DB_PATH", "/home/container/serveircmail.db")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 DEFAULT_PERMISSIONS = [
-    "can_send_mail",
-    "can_delete_mail",
-    "can_manage_users",
-    "can_manage_roles",
-    "can_view_logs",
-    "can_suspend_users",
-    "can_change_settings",
-    "can_view_all_mailboxes",
-    "can_create_accounts",
-    "can_reset_passwords",
-    "can_ban_users",
-    "can_view_stats",
-    "can_view_all_mails",
+    "can_send_mail", "can_delete_mail", "can_manage_users", "can_manage_roles",
+    "can_view_logs", "can_suspend_users", "can_change_settings",
+    "can_view_all_mailboxes", "can_create_accounts", "can_reset_passwords",
+    "can_ban_users", "can_view_stats", "can_view_all_mails", "can_manage_mail_addresses",
 ]
 
 ROLE_PERMISSIONS = {
     "SUPER_ADMIN": DEFAULT_PERMISSIONS,
     "ADMIN": [
-        "can_send_mail", "can_delete_mail", "can_manage_users",
-        "can_view_logs", "can_suspend_users", "can_view_all_mailboxes",
-        "can_create_accounts", "can_reset_passwords", "can_view_stats",
-        "can_view_all_mails",
+        "can_send_mail", "can_delete_mail", "can_manage_users", "can_view_logs",
+        "can_suspend_users", "can_view_all_mailboxes", "can_create_accounts",
+        "can_reset_passwords", "can_view_stats", "can_view_all_mails",
+        "can_manage_mail_addresses",
     ],
     "MODERATOR": [
-        "can_send_mail", "can_delete_mail",
-        "can_view_logs", "can_suspend_users", "can_view_stats",
-        "can_view_all_mails",
+        "can_send_mail", "can_delete_mail", "can_view_logs",
+        "can_suspend_users", "can_view_stats", "can_view_all_mails",
     ],
     "USER": ["can_send_mail", "can_delete_mail"],
 }
@@ -83,13 +73,22 @@ def init_db():
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         role_id INTEGER DEFAULT 4,
-        mail_alias TEXT DEFAULT '',
-        mail_username TEXT DEFAULT '',
         is_active INTEGER DEFAULT 1,
         is_banned INTEGER DEFAULT 0,
         avatar_color TEXT DEFAULT '#6C63FF',
         last_login TEXT DEFAULT '',
         created_at TEXT DEFAULT (datetime('now'))
+    )""")
+
+    # Table des adresses mail (1 user peut en avoir plusieurs)
+    c.execute("""CREATE TABLE IF NOT EXISTS mail_addresses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        address TEXT UNIQUE NOT NULL,
+        is_primary INTEGER DEFAULT 0,
+        label TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )""")
 
     c.execute("""CREATE TABLE IF NOT EXISTS inbound_mails (
@@ -141,14 +140,6 @@ def init_db():
         updated_at TEXT DEFAULT (datetime('now'))
     )""")
 
-    # Migrations — suppression des colonnes IMAP/SMTP par user (obsolètes)
-    for col in ["mail_username", "mail_alias"]:
-        try:
-            c.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT ''")
-            conn.commit()
-        except:
-            pass
-
     default_roles = [
         ("SUPER_ADMIN", "Super Admin", "#FF6584", "Contrôle total du système", 1),
         ("ADMIN", "Admin", "#6C63FF", "Gestion des comptes et paramètres", 1),
@@ -172,6 +163,7 @@ def init_db():
         ("can_ban_users", "Bannir des utilisateurs", "Bannir définitivement un compte", "moderation"),
         ("can_view_stats", "Voir les statistiques", "Accès au dashboard de stats", "admin"),
         ("can_view_all_mails", "Voir tous les mails (modération)", "Accès à la boîte de modération globale", "moderation"),
+        ("can_manage_mail_addresses", "Gérer les adresses mail", "Créer/supprimer des adresses pour n'importe quel compte", "admin"),
     ]
     for p in perm_data:
         c.execute("INSERT OR IGNORE INTO permissions (key, label, description, category) VALUES (?,?,?,?)", p)
@@ -187,9 +179,7 @@ def init_db():
         ("maintenance_mode", "0"),
         ("site_name", "serveircMail"),
         ("max_users", "100"),
-        # SMTP Resend
         ("global_smtp_password", os.getenv("SMTP_PASSWORD", "")),
-        # Domaine mail
         ("mail_domain", os.getenv("MAIL_DOMAIN", "")),
     ]
     for k, v in defaults:
@@ -236,12 +226,6 @@ def get_user_by_email(email: str):
     conn.close()
     return dict(user) if user else None
 
-def get_user_by_alias(alias: str):
-    conn = get_conn()
-    user = conn.execute("SELECT * FROM users WHERE mail_alias=?", (alias,)).fetchone()
-    conn.close()
-    return dict(user) if user else None
-
 def get_all_users(search: str = "", page: int = 1, per_page: int = 20):
     conn = get_conn()
     offset = (page - 1) * per_page
@@ -260,7 +244,7 @@ def get_all_users(search: str = "", page: int = 1, per_page: int = 20):
     conn.close()
     return [dict(u) for u in users], total
 
-def create_user(username, display_name, email, password, role_id=4, mail_alias="", mail_username="", **kwargs):
+def create_user(username, display_name, email, password, role_id=4):
     conn = get_conn()
     hashed = _hash_password(password)
     colors = ["#6C63FF", "#3EC6E0", "#FF6584", "#4ade80", "#fbbf24", "#f472b6"]
@@ -268,8 +252,8 @@ def create_user(username, display_name, email, password, role_id=4, mail_alias="
     color = random.choice(colors)
     try:
         conn.execute(
-            "INSERT INTO users (username, display_name, email, password_hash, role_id, mail_alias, mail_username, avatar_color) VALUES (?,?,?,?,?,?,?,?)",
-            (username, display_name, email, hashed, role_id, mail_alias, mail_username, color)
+            "INSERT INTO users (username, display_name, email, password_hash, role_id, avatar_color) VALUES (?,?,?,?,?,?)",
+            (username, display_name, email, hashed, role_id, color)
         )
         conn.commit()
         conn.close()
@@ -282,9 +266,6 @@ def update_user(user_id, **kwargs):
     conn = get_conn()
     if "password" in kwargs:
         kwargs["password_hash"] = _hash_password(kwargs.pop("password"))
-    # Supprimer les champs obsolètes IMAP/SMTP s'ils arrivent encore
-    for obsolete in ["imap_host", "imap_port", "smtp_host", "smtp_port", "mail_password"]:
-        kwargs.pop(obsolete, None)
     fields = ", ".join(f"{k}=?" for k in kwargs)
     values = list(kwargs.values()) + [user_id]
     conn.execute(f"UPDATE users SET {fields} WHERE id=?", values)
@@ -295,11 +276,91 @@ def delete_user(user_id: int):
     conn = get_conn()
     conn.execute("DELETE FROM users WHERE id=?", (user_id,))
     conn.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+    conn.execute("DELETE FROM mail_addresses WHERE user_id=?", (user_id,))
     conn.commit()
     conn.close()
 
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain.encode('utf-8')[:72], hashed)
+
+# ========== MAIL ADDRESSES ==========
+
+def get_user_addresses(user_id: int):
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM mail_addresses WHERE user_id=? ORDER BY is_primary DESC, created_at ASC", (user_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_primary_address(user_id: int):
+    conn = get_conn()
+    row = conn.execute("SELECT address FROM mail_addresses WHERE user_id=? AND is_primary=1 LIMIT 1", (user_id,)).fetchone()
+    if not row:
+        row = conn.execute("SELECT address FROM mail_addresses WHERE user_id=? LIMIT 1", (user_id,)).fetchone()
+    conn.close()
+    return row["address"] if row else ""
+
+def get_all_addresses_for_user(user_id: int):
+    """Retourne la liste des adresses mail sous forme de strings."""
+    rows = get_user_addresses(user_id)
+    return [r["address"] for r in rows]
+
+def address_exists(address: str) -> bool:
+    conn = get_conn()
+    row = conn.execute("SELECT id FROM mail_addresses WHERE address=?", (address.lower(),)).fetchone()
+    conn.close()
+    return row is not None
+
+def get_user_by_address(address: str):
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT u.* FROM mail_addresses ma JOIN users u ON ma.user_id=u.id WHERE ma.address=?",
+        (address.lower(),)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def add_mail_address(user_id: int, address: str, label: str = "", is_primary: bool = False) -> tuple:
+    conn = get_conn()
+    try:
+        # Si c'est la première adresse du user, la mettre en primaire automatiquement
+        count = conn.execute("SELECT COUNT(*) FROM mail_addresses WHERE user_id=?", (user_id,)).fetchone()[0]
+        primary = 1 if (is_primary or count == 0) else 0
+        if primary:
+            conn.execute("UPDATE mail_addresses SET is_primary=0 WHERE user_id=?", (user_id,))
+        conn.execute(
+            "INSERT INTO mail_addresses (user_id, address, is_primary, label) VALUES (?,?,?,?)",
+            (user_id, address.lower(), primary, label)
+        )
+        conn.commit()
+        conn.close()
+        return True, None
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False, "Cette adresse est déjà utilisée"
+
+def remove_mail_address(address_id: int, user_id: int = None) -> bool:
+    """Supprime une adresse. Si user_id fourni, vérifie que l'adresse appartient bien à cet user."""
+    conn = get_conn()
+    if user_id:
+        result = conn.execute("DELETE FROM mail_addresses WHERE id=? AND user_id=?", (address_id, user_id))
+    else:
+        result = conn.execute("DELETE FROM mail_addresses WHERE id=?", (address_id,))
+    conn.commit()
+    conn.close()
+    return result.rowcount > 0
+
+def set_primary_address(address_id: int, user_id: int):
+    conn = get_conn()
+    conn.execute("UPDATE mail_addresses SET is_primary=0 WHERE user_id=?", (user_id,))
+    conn.execute("UPDATE mail_addresses SET is_primary=1 WHERE id=? AND user_id=?", (address_id, user_id))
+    conn.commit()
+    conn.close()
+
+def count_user_addresses(user_id: int) -> int:
+    conn = get_conn()
+    count = conn.execute("SELECT COUNT(*) FROM mail_addresses WHERE user_id=?", (user_id,)).fetchone()[0]
+    conn.close()
+    return count
 
 # ========== PENDING USERS ==========
 
@@ -337,17 +398,20 @@ def confirm_pending_user(email: str, code: str):
         display_name=pending["display_name"],
         email=pending["email"],
         password="__hashed__",
-        mail_alias=pending["mail_alias"],
-        mail_username=pending["mail_alias"],
     )
     if not ok:
         return False, err
     conn = get_conn()
     conn.execute("UPDATE users SET password_hash=? WHERE email=?", (pending["password_hash"], pending["email"]))
-    conn.execute("DELETE FROM pending_users WHERE email=?", (email,))
     conn.commit()
+    # Créer l'adresse mail primaire
+    user = dict(conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone())
     conn.close()
-    user = get_user_by_email(email)
+    add_mail_address(user["id"], pending["mail_alias"], label="Principal", is_primary=True)
+    conn2 = get_conn()
+    conn2.execute("DELETE FROM pending_users WHERE email=?", (email,))
+    conn2.commit()
+    conn2.close()
     return True, user
 
 # ========== SESSIONS ==========
@@ -491,6 +555,7 @@ def save_inbound_mail(mail_to: str, mail_from: str, subject: str, body_html: str
     conn.close()
 
 def get_inbound_mails(mail_to: str, folder: str = "INBOX", page: int = 1, per_page: int = 20):
+    """Récupère les mails d'une adresse précise."""
     conn = get_conn()
     offset = (page - 1) * per_page
     total = conn.execute(
@@ -503,16 +568,45 @@ def get_inbound_mails(mail_to: str, folder: str = "INBOX", page: int = 1, per_pa
     ).fetchall()
     conn.close()
     pages = max(1, (total + per_page - 1) // per_page)
-    mails = []
-    for r in rows:
-        mails.append({
-            'uid': str(r['id']),
-            'from': r['mail_from'],
-            'to': r['mail_to'],
-            'subject': r['subject'] or '(Sans objet)',
-            'date': r['received_at'],
-            'seen': bool(r['seen']),
-        })
+    mails = [{'uid': str(r['id']), 'from': r['mail_from'], 'to': r['mail_to'],
+               'subject': r['subject'] or '(Sans objet)', 'date': r['received_at'], 'seen': bool(r['seen'])} for r in rows]
+    return {'mails': mails, 'total': total, 'page': page, 'pages': pages}
+
+def get_inbound_mails_multi(addresses: list, folder: str = "INBOX", page: int = 1, per_page: int = 20):
+    """Récupère les mails de plusieurs adresses (pour les users avec plusieurs adresses)."""
+    if not addresses:
+        return {'mails': [], 'total': 0, 'page': 1, 'pages': 1}
+    conn = get_conn()
+    offset = (page - 1) * per_page
+    placeholders = ",".join("?" * len(addresses))
+    lower_addrs = [a.lower() for a in addresses]
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM inbound_mails WHERE mail_to IN ({placeholders}) AND folder=?",
+        lower_addrs + [folder]
+    ).fetchone()[0]
+    rows = conn.execute(
+        f"SELECT id, mail_from, mail_to, subject, seen, received_at FROM inbound_mails WHERE mail_to IN ({placeholders}) AND folder=? ORDER BY received_at DESC LIMIT ? OFFSET ?",
+        lower_addrs + [folder, per_page, offset]
+    ).fetchall()
+    conn.close()
+    pages = max(1, (total + per_page - 1) // per_page)
+    mails = [{'uid': str(r['id']), 'from': r['mail_from'], 'to': r['mail_to'],
+               'subject': r['subject'] or '(Sans objet)', 'date': r['received_at'], 'seen': bool(r['seen'])} for r in rows]
+    return {'mails': mails, 'total': total, 'page': page, 'pages': pages}
+
+def get_all_inbound_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20):
+    """Toutes les adresses — réservé modération."""
+    conn = get_conn()
+    offset = (page - 1) * per_page
+    total = conn.execute("SELECT COUNT(*) FROM inbound_mails WHERE folder=?", (folder,)).fetchone()[0]
+    rows = conn.execute(
+        "SELECT id, mail_from, mail_to, subject, seen, received_at FROM inbound_mails WHERE folder=? ORDER BY received_at DESC LIMIT ? OFFSET ?",
+        (folder, per_page, offset)
+    ).fetchall()
+    conn.close()
+    pages = max(1, (total + per_page - 1) // per_page)
+    mails = [{'uid': str(r['id']), 'from': r['mail_from'], 'to': r['mail_to'],
+               'subject': r['subject'] or '(Sans objet)', 'date': r['received_at'], 'seen': bool(r['seen'])} for r in rows]
     return {'mails': mails, 'total': total, 'page': page, 'pages': pages}
 
 def get_inbound_mail_by_id(mail_id: int):
@@ -521,17 +615,10 @@ def get_inbound_mail_by_id(mail_id: int):
     conn.close()
     if not row:
         return None
-    return {
-        'uid': str(row['id']),
-        'subject': row['subject'] or '(Sans objet)',
-        'from': row['mail_from'],
-        'to': row['mail_to'],
-        'date': row['received_at'],
-        'body_html': row['body_html'],
-        'body_text': row['body_text'],
-        'seen': bool(row['seen']),
-        'folder': row['folder'],
-    }
+    return {'uid': str(row['id']), 'subject': row['subject'] or '(Sans objet)',
+            'from': row['mail_from'], 'to': row['mail_to'], 'date': row['received_at'],
+            'body_html': row['body_html'], 'body_text': row['body_text'],
+            'seen': bool(row['seen']), 'folder': row['folder']}
 
 def mark_inbound_mail_seen(mail_id: int):
     conn = get_conn()
@@ -556,14 +643,13 @@ def get_global_stats():
     suspended_users = conn.execute("SELECT COUNT(*) FROM users WHERE is_active=0 AND is_banned=0").fetchone()[0]
     total_logs = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0]
     recent_logins = conn.execute("SELECT COUNT(*) FROM users WHERE last_login > datetime('now', '-24 hours')").fetchone()[0]
+    total_addresses = conn.execute("SELECT COUNT(*) FROM mail_addresses").fetchone()[0]
+    total_mails = conn.execute("SELECT COUNT(*) FROM inbound_mails").fetchone()[0]
     role_stats = conn.execute("SELECT r.display_name, r.color, COUNT(u.id) as count FROM roles r LEFT JOIN users u ON u.role_id=r.id GROUP BY r.id").fetchall()
     conn.close()
     return {
-        "total_users": total_users,
-        "active_users": active_users,
-        "banned_users": banned_users,
-        "suspended_users": suspended_users,
-        "total_logs": total_logs,
-        "recent_logins": recent_logins,
+        "total_users": total_users, "active_users": active_users, "banned_users": banned_users,
+        "suspended_users": suspended_users, "total_logs": total_logs, "recent_logins": recent_logins,
+        "total_addresses": total_addresses, "total_mails": total_mails,
         "role_stats": [dict(r) for r in role_stats],
     }
