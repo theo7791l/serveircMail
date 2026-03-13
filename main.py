@@ -317,6 +317,12 @@ async def admin_add_address(request: Request, uid: int,
     db.add_audit_log(user["id"], user["username"], "ADD_MAIL_ADDRESS", target=str(uid), details=address)
     return JSONResponse({"success": True})
 
+@app.get("/admin/users/{uid}/addresses/list")
+async def admin_list_addresses(request: Request, uid: int,
+    user=Depends(auth.require_perm("can_manage_mail_addresses"))):
+    addresses = db.get_user_addresses(uid)
+    return JSONResponse({"addresses": addresses})
+
 @app.post("/admin/addresses/{addr_id}/delete")
 async def admin_delete_address(request: Request, addr_id: int,
     user=Depends(auth.require_perm("can_manage_mail_addresses"))):
@@ -397,9 +403,8 @@ async def api_mail(uid: int, user=Depends(auth.require_auth)):
     if "error" in mail:
         raise HTTPException(404, detail=mail["error"])
     user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
-    # Pour les mails Sent, le champ mail_to = adresse de l'expéditeur
     if mail.get("to", "").lower() not in user_addrs and mail.get("from", "").lower() not in user_addrs:
-        raise HTTPException(403, detail="Accès refusé")
+        raise HTTPException(403, detail="Acc\u00e8s refus\u00e9")
     return mail
 
 @app.post("/api/send")
@@ -419,7 +424,7 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
     if from_address:
         user_addrs = db.get_all_addresses_for_user(user["id"])
         if from_address.lower() not in [a.lower() for a in user_addrs]:
-            raise HTTPException(403, detail="Adresse expéditrice non autorisée")
+            raise HTTPException(403, detail="Adresse exp\u00e9ditrice non autoris\u00e9e")
 
     ok, err = email_client.send_mail(
         user=user,
@@ -431,9 +436,7 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
     )
 
     if ok:
-        # Résoudre l'adresse expéditrice réellement utilisée
         sent_from = from_address or db.get_primary_address(user["id"]) or f"noreply@{db.get_setting('mail_domain', 'awlor.online')}"
-        # Sauvegarder dans le dossier Sent (mail_to = adresse expéditrice pour retrouver via get_inbound_mails)
         body_html = body if is_html else ""
         body_text = "" if is_html else body
         db.save_inbound_mail(
@@ -482,39 +485,4 @@ async def api_moderation_mail(uid: int, user=Depends(auth.require_perm("can_view
 @app.post("/api/moderation/mail/{uid}/delete")
 async def api_moderation_delete(uid: int, user=Depends(auth.require_perm("can_view_all_mails"))):
     ok = db.delete_inbound_mail(uid)
-    db.add_audit_log(user["id"], user["username"], "MODERATION_DELETE_MAIL", target=str(uid))
-    return {"success": ok}
-
-# ============================================================
-# API ADMIN
-# ============================================================
-
-@app.get("/api/admin/users/{uid}/addresses")
-async def api_admin_user_addresses(uid: int, user=Depends(auth.require_perm("can_manage_mail_addresses"))):
-    return {"addresses": db.get_user_addresses(uid)}
-
-@app.post("/api/admin/test-smtp-connection")
-async def api_test_smtp(user=Depends(auth.require_perm("can_change_settings"))):
-    smtp_pass = db.get_setting("global_smtp_password", "")
-    if not smtp_pass:
-        return JSONResponse({"success": False, "error": "Clé API Resend manquante"})
-    ok, result = email_client.test_smtp_connection(smtp_pass)
-    return JSONResponse({"success": ok, "message": result if ok else "", "error": result if not ok else ""})
-
-@app.get("/api/stats")
-async def api_stats(user=Depends(auth.require_auth)):
-    primary = db.get_primary_address(user["id"])
-    addresses = db.get_user_addresses(user["id"])
-    return {"primary_address": primary, "addresses": addresses}
-
-@app.get("/api/admin/stats")
-async def api_admin_stats(user=Depends(auth.require_perm("can_view_stats"))):
-    return db.get_global_stats()
-
-@app.get("/health")
-async def health():
-    return {"status": "ok", "app": "Awlor"}
-
-if __name__ == "__main__":
-    port = int(db.get_setting("app_port") or os.getenv("PORT", 15431))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    return JSONResponse({"success": ok})
