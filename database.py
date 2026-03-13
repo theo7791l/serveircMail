@@ -761,6 +761,25 @@ def get_inbound_mails_multi(addresses: list, folder: str = "INBOX", page: int = 
     placeholders = ",".join("?" * len(addresses))
     lower_addrs = [a.lower() for a in addresses]
 
+    # FIX: le dossier "Starred" est une vue virtuelle (starred=1 sur tous les dossiers sauf Trash)
+    if folder == "Starred":
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM inbound_mails WHERE mail_to IN ({placeholders}) AND starred=1 AND folder != 'Trash'",
+            lower_addrs
+        ).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT id, mail_from, mail_to, subject, seen, starred, received_at FROM inbound_mails "
+            f"WHERE mail_to IN ({placeholders}) AND starred=1 AND folder != 'Trash' "
+            f"ORDER BY received_at DESC LIMIT ? OFFSET ?",
+            lower_addrs + [per_page, offset]
+        ).fetchall()
+        conn.close()
+        pages = max(1, (total + per_page - 1) // per_page)
+        mails = [{'uid': str(r['id']), 'from': r['mail_from'], 'to': r['mail_to'],
+                   'subject': r['subject'] or '(Sans objet)', 'date': r['received_at'],
+                   'seen': bool(r['seen']), 'starred': bool(r['starred'])} for r in rows]
+        return {'mails': mails, 'total': total, 'page': page, 'pages': pages}
+
     if folder == "Sent":
         field = "mail_from"
     else:
@@ -822,6 +841,7 @@ def mark_inbound_mail_seen(mail_id: int):
     conn.close()
 
 def toggle_star(mail_id: int) -> bool:
+    """Toggle l'étoile d'un mail. Ne change PAS le folder (Starred est une vue virtuelle)."""
     conn = get_conn()
     row = conn.execute("SELECT starred FROM inbound_mails WHERE id=?", (mail_id,)).fetchone()
     if not row:
