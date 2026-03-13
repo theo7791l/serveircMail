@@ -1,26 +1,30 @@
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.utils import formataddr
 import os
+import resend
+from email.utils import formataddr
 
 
-def _get_smtp_config() -> dict:
+def _get_config() -> dict:
     from database import get_setting
     return {
-        'smtp_host': 'smtp.resend.com',
-        'smtp_port': 587,
-        'smtp_user': 'resend',
-        'smtp_pass': get_setting('global_smtp_password') or os.getenv('SMTP_PASSWORD', ''),
+        'api_key': get_setting('global_smtp_password') or os.getenv('RESEND_API_KEY', ''),
         'mail_domain': get_setting('mail_domain') or os.getenv('MAIL_DOMAIN', 'awlor.online'),
     }
 
 
+def _resolve_from_address(user: dict, from_address: str = None) -> str:
+    if from_address and from_address.strip():
+        return from_address.strip().lower()
+    if user and user.get('id'):
+        from database import get_primary_address
+        addr = get_primary_address(user['id'])
+        if addr and addr.strip():
+            return addr.strip().lower()
+    from database import get_setting
+    domain = get_setting('mail_domain') or os.getenv('MAIL_DOMAIN', 'awlor.online')
+    return f'noreply@{domain}'
+
+
 def _format_from(display_name: str, address: str) -> str:
-    """
-    Retourne "Prénom Nom <email@domaine.com>" accepté par Resend.
-    Si pas de display_name, retourne juste l'adresse.
-    """
     address = (address or '').strip().lower()
     if not address:
         return ''
@@ -28,28 +32,6 @@ def _format_from(display_name: str, address: str) -> str:
     if display_name:
         return formataddr((display_name, address))
     return address
-
-
-def _resolve_from_address(user: dict, from_address: str = None) -> str:
-    """
-    Résout l'adresse expéditrice dans l'ordre :
-    1. from_address fourni explicitement
-    2. adresse primaire du user (si user a un id)
-    3. fallback noreply@<mail_domain>
-    """
-    if from_address and from_address.strip():
-        return from_address.strip().lower()
-
-    if user and user.get('id'):
-        from database import get_primary_address
-        addr = get_primary_address(user['id'])
-        if addr and addr.strip():
-            return addr.strip().lower()
-
-    # Fallback ultime
-    from database import get_setting
-    domain = get_setting('mail_domain') or os.getenv('MAIL_DOMAIN', 'awlor.online')
-    return f'noreply@{domain}'
 
 
 def get_folders(user: dict):
@@ -74,32 +56,37 @@ def get_mail(user: dict, uid: str, folder: str = 'INBOX'):
 
 def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False, from_address: str = None):
     """
-    Envoi via Resend SMTP.
-    L'adresse expéditrice est toujours résolue (jamais vide).
+    Envoi via Resend REST API (SDK officiel).
+    La cle API = global_smtp_password en BDD (ou RESEND_API_KEY en env).
     """
-    cfg = _get_smtp_config()
+    cfg = _get_config()
+    api_key = cfg['api_key']
+
+    if not api_key:
+        return False, "Cle API Resend manquante (configurez global_smtp_password dans le panel admin)"
+
+    resend.api_key = api_key
 
     raw_addr = _resolve_from_address(user, from_address)
     display_name = (user or {}).get('display_name', '') or ''
     from_header = _format_from(display_name, raw_addr)
 
     try:
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = from_header
-        msg['To'] = to.strip()
-        msg['Reply-To'] = from_header
-        msg.attach(MIMEText(body, 'html' if html else 'plain', 'utf-8'))
+        params = {
+            "from": from_header or raw_addr,
+            "to": [to.strip()],
+            "subject": subject,
+        }
+        if html:
+            params["html"] = body
+        else:
+            params["text"] = body
 
-        server = smtplib.SMTP(cfg['smtp_host'], cfg['smtp_port'], timeout=15)
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(cfg['smtp_user'], cfg['smtp_pass'])
-        # sendmail : adresse brute sans display name pour l'enveloppe SMTP
-        server.sendmail(raw_addr, to.strip(), msg.as_string())
-        server.quit()
-        return True, None
+        result = resend.Emails.send(params)
+        # SDK retourne un dict avec 'id' si succes, ou leve une exception
+        if result and result.get('id'):
+            return True, None
+        return False, str(result)
     except Exception as e:
         return False, str(e)
 
@@ -111,20 +98,30 @@ def delete_mail(user: dict, uid: str, folder: str = 'INBOX'):
         return False, 'Mail introuvable'
     if user:
         addresses = get_all_addresses_for_user(user['id'])
-        if mail['to'].lower() not in [a.lower() for a in addresses]:
-            return False, 'Accès refusé'
+        if mail['mail_to'].lower() not in [a.lower() for a in addresses]:
+            return False, 'Acces refuse'
     ok = delete_inbound_mail(int(uid))
     return (True, None) if ok else (False, 'Erreur suppression')
 
 
-def test_smtp_connection(smtp_pass: str):
+def test_smtp_connection(api_key: str):
+    """
+    Teste la cle API Resend en envoyant un email de test a delivered@resend.dev
+    (adresse de test officielle Resend qui accepte tout sans erreur).
+    """
+    if not api_key:
+        return False, "Cle API vide"
     try:
-        server = smtplib.SMTP('smtp.resend.com', 587, timeout=10)
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login('resend', smtp_pass)
-        server.quit()
-        return True, 'Connexion Resend SMTP réussie'
+        resend.api_key = api_key
+        params = {
+            "from": "test@resend.dev",
+            "to": ["delivered@resend.dev"],
+            "subject": "Resend API test",
+            "text": "Test de connexion Resend OK",
+        }
+        result = resend.Emails.send(params)
+        if result and result.get('id'):
+            return True, f"Connexion Resend API reussie (id={result['id']})"
+        return False, str(result)
     except Exception as e:
         return False, str(e)
