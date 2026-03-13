@@ -1,6 +1,8 @@
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.headerregistry import Address
+from email.utils import formataddr
 import os
 
 
@@ -15,15 +17,23 @@ def _get_smtp_config() -> dict:
     }
 
 
+def _format_from(display_name: str, address: str) -> str:
+    """
+    Retourne une chaîne "Prénom Nom <email@domaine.com>" correctement encodée.
+    Resend exige ce format strict pour le champ From.
+    """
+    if not address:
+        return ''
+    if display_name:
+        return formataddr((display_name.strip(), address.strip().lower()))
+    return address.strip().lower()
+
+
 def get_folders(user: dict):
     return ['INBOX', 'Sent', 'Trash']
 
 
 def get_mails(user: dict, folder: str = 'INBOX', page: int = 1, per_page: int = 20, address: str = None):
-    """
-    Si 'address' est fourni, filtre sur cette adresse précise.
-    Sinon, récupère les mails de TOUTES les adresses du user.
-    """
     from database import get_inbound_mails, get_inbound_mails_multi, get_all_addresses_for_user
     if address:
         return get_inbound_mails(mail_to=address, folder=folder, page=page, per_page=per_page)
@@ -44,28 +54,39 @@ def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False, 
     Envoi via Resend SMTP (smtp.resend.com:587 STARTTLS).
     'from_address' permet de choisir quelle adresse utiliser comme expéditeur.
     Si non fourni, utilise l'adresse primaire du user.
+    Le champ From est toujours formaté "Display Name <email@domaine>" pour Resend.
     """
     cfg = _get_smtp_config()
+
     if from_address:
-        from_addr = from_address
+        raw_addr = from_address.strip().lower()
     else:
         from database import get_primary_address
-        from_addr = get_primary_address(user['id']) if user.get('id') else user.get('email', '')
+        raw_addr = get_primary_address(user['id']) if user.get('id') else user.get('email', '')
+
+    # Formatage strict : "Prénom Nom <email@domaine.com>"
+    display_name = user.get('display_name', '') if user else ''
+    from_header = _format_from(display_name, raw_addr)
+
+    if not from_header:
+        return False, "Adresse expéditeur manquante"
 
     try:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
-        msg['From'] = from_addr
-        msg['To'] = to
-        msg['Reply-To'] = from_addr
+        msg['From'] = from_header
+        msg['To'] = to.strip()
+        msg['Reply-To'] = from_header
+
         msg.attach(MIMEText(body, 'html' if html else 'plain', 'utf-8'))
 
-        server = smtplib.SMTP(cfg['smtp_host'], cfg['smtp_port'])
+        server = smtplib.SMTP(cfg['smtp_host'], cfg['smtp_port'], timeout=15)
         server.ehlo()
         server.starttls()
         server.ehlo()
         server.login(cfg['smtp_user'], cfg['smtp_pass'])
-        server.sendmail(from_addr, to, msg.as_string())
+        # sendmail prend l'adresse brute (sans display name) pour l'enveloppe SMTP
+        server.sendmail(raw_addr, to.strip(), msg.as_string())
         server.quit()
         return True, None
     except Exception as e:
@@ -77,7 +98,6 @@ def delete_mail(user: dict, uid: str, folder: str = 'INBOX'):
     mail = get_inbound_mail_by_id(int(uid))
     if not mail:
         return False, 'Mail introuvable'
-    # Vérification d'ownership (sauf si user est None = suppression admin)
     if user:
         addresses = get_all_addresses_for_user(user['id'])
         if mail['to'].lower() not in [a.lower() for a in addresses]:
