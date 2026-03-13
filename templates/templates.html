@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+{% block title %}Templates — {{ site_name }}{% endblock %}
+{% block page_title %}<i class="fa fa-rectangle-list" style="color:var(--primary)"></i> Templates de réponse{% endblock %}
+
+{% block content %}
+<div style="display:grid;grid-template-columns:1fr 380px;gap:20px;">
+
+  <!-- LISTE -->
+  <div class="card">
+    <div style="padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;">
+      <h2 style="font-size:15px;font-weight:700;flex:1;">Vos templates <span id="tpl-count" style="font-size:12px;background:rgba(108,99,255,0.15);padding:2px 8px;border-radius:10px;color:var(--primary);">0</span></h2>
+      <a href="/compose" class="btn btn-ghost btn-sm"><i class="fa fa-pen-to-square"></i> Nouveau mail</a>
+    </div>
+    <div id="tpl-list" style="padding:16px;"></div>
+  </div>
+
+  <!-- FORMULAIRE -->
+  <div class="card">
+    <div style="padding:18px 20px;border-bottom:1px solid var(--border);">
+      <h3 style="font-size:14px;font-weight:700;"><i class="fa fa-plus" style="color:var(--primary)"></i> Nouveau template</h3>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+      <div class="form-group">
+        <label class="form-label">Nom</label>
+        <input id="t-name" type="text" class="form-input" placeholder="Ex: Relance commerciale">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Objet (optionnel)</label>
+        <input id="t-subject" type="text" class="form-input" placeholder="Ex: Relance — {{nom}}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Corps du mail</label>
+        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+          <button type="button" class="editor-btn" onclick="tplCmd('bold')"><i class="fa fa-bold"></i></button>
+          <button type="button" class="editor-btn" onclick="tplCmd('italic')"><i class="fa fa-italic"></i></button>
+          <button type="button" class="editor-btn" onclick="tplCmd('underline')"><i class="fa fa-underline"></i></button>
+          <button type="button" class="editor-btn" onclick="tplCmd('insertUnorderedList')"><i class="fa fa-list-ul"></i></button>
+          <button type="button" class="editor-btn" onclick="insertVar('{{nom}}')"><i class="fa fa-user"></i> nom</button>
+          <button type="button" class="editor-btn" onclick="insertVar('{{date}}')"><i class="fa fa-calendar"></i> date</button>
+          <button type="button" class="editor-btn" onclick="insertVar('{{heure}}')"><i class="fa fa-clock"></i> heure</button>
+        </div>
+        <div id="t-body" contenteditable="true"
+          style="min-height:160px;padding:12px 14px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius);outline:none;color:var(--text);font-size:13px;line-height:1.7;"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Raccourci (optionnel)</label>
+        <input id="t-shortcut" type="text" class="form-input" placeholder="Ex: /relance">
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">Tapez ce raccourci dans l'éditeur pour insérer le template.</div>
+      </div>
+      <button class="btn btn-primary" onclick="createTemplate()" style="width:100%;justify-content:center;">
+        <i class="fa fa-plus"></i> Créer
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<style>
+.editor-btn{background:none;border:none;cursor:pointer;color:var(--text-muted);padding:6px 9px;border-radius:6px;font-size:13px;transition:var(--transition);font-family:var(--font);}
+.editor-btn:hover{background:rgba(108,99,255,0.15);color:var(--text);}
+.tpl-card{background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius);padding:16px;transition:var(--transition);animation:mailItemIn .3s ease;margin-bottom:12px;}
+.tpl-card:hover{border-color:var(--border-glow);}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', loadTemplates);
+
+async function loadTemplates() {
+  const res = await fetch('/api/templates');
+  const data = await res.json();
+  const list = document.getElementById('tpl-list');
+  document.getElementById('tpl-count').textContent = data.templates.length;
+  if (!data.templates.length) {
+    list.innerHTML = `<div style="text-align:center;padding:48px;color:var(--text-dim);"><i class="fa fa-rectangle-list" style="font-size:36px;opacity:.2;margin-bottom:12px;"></i><p style="font-size:13px;">Aucun template. Créez-en un !</p></div>`;
+    return;
+  }
+  list.innerHTML = data.templates.map(t => `
+    <div class="tpl-card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <div style="width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--primary),var(--accent2));display:flex;align-items:center;justify-content:center;"><i class="fa fa-file-lines" style="font-size:14px;"></i></div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600;">${esc(t.name)}</div>
+          ${t.subject?`<div style="font-size:11px;color:var(--text-dim);">${esc(t.subject)}</div>`:''}
+        </div>
+        ${t.shortcut?`<code style="font-size:11px;padding:2px 6px;background:rgba(255,255,255,0.06);border-radius:4px;">${esc(t.shortcut)}</code>`:''}
+        <button class="btn btn-ghost btn-sm" onclick="deleteTemplate(${t.id})" style="color:var(--accent2);"><i class="fa fa-trash"></i></button>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);padding:10px 12px;background:rgba(255,255,255,0.02);border-radius:6px;border:1px solid var(--border);max-height:80px;overflow:hidden;">${t.body_html||'(vide)'}</div>
+      <div style="margin-top:10px;">
+        <a href="/compose" onclick="sessionStorage.setItem('use_template_id','${t.id}')" class="btn btn-ghost btn-sm"><i class="fa fa-pen"></i> Utiliser</a>
+      </div>
+    </div>`).join('');
+}
+
+function tplCmd(cmd) {
+  document.getElementById('t-body').focus();
+  document.execCommand(cmd, false, null);
+}
+
+function insertVar(v) {
+  document.getElementById('t-body').focus();
+  document.execCommand('insertText', false, v);
+}
+
+async function createTemplate() {
+  const name = document.getElementById('t-name').value.trim();
+  const subject = document.getElementById('t-subject').value.trim();
+  const body_html = document.getElementById('t-body').innerHTML;
+  const shortcut = document.getElementById('t-shortcut').value.trim();
+  if (!name) return showToast('Nom requis', 'error');
+  if (!body_html || body_html === '<br>') return showToast('Corps requis', 'error');
+  const res = await fetch('/api/templates', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, subject, body_html, shortcut})
+  });
+  const data = await res.json();
+  if (data.success) {
+    showToast('Template créé ✓', 'success');
+    document.getElementById('t-name').value = '';
+    document.getElementById('t-subject').value = '';
+    document.getElementById('t-body').innerHTML = '';
+    document.getElementById('t-shortcut').value = '';
+    loadTemplates();
+  } else showToast('Erreur', 'error');
+}
+
+async function deleteTemplate(id) {
+  if (!confirm('Supprimer ce template ?')) return;
+  await fetch(`/api/templates/${id}`, {method:'DELETE'});
+  showToast('Template supprimé', 'info');
+  loadTemplates();
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+</script>
+{% endblock %}

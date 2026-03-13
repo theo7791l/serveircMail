@@ -1,55 +1,256 @@
-{% extends "base.html" %}
-{% block auth_content %}
-<div class="auth-page">
-  <div class="auth-card">
-    <div class="auth-logo">
-      <div class="auth-logo-icon"><i class="fa fa-envelope-open-text"></i></div>
-      <h1 class="auth-title">{{ site_name }}</h1>
-      <p class="auth-subtitle">Connectez-vous à votre messagerie</p>
-    </div>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connexion — {{ site_name }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    :root{
+      --primary:#6C63FF;--accent:#3EC6E0;--accent2:#FF6584;
+      --bg:#070714;--bg-card:rgba(255,255,255,0.04);
+      --border:rgba(255,255,255,0.08);--border-glow:rgba(108,99,255,0.4);
+      --text:#E8E8F0;--text-muted:#8888AA;--text-dim:#555570;
+      --gold:#fbbf24;--radius:12px;--radius-lg:16px;
+      --font:'Inter','SF Pro Display',-apple-system,sans-serif;
+      --transition:all .2s cubic-bezier(0.4,0,0.2,1);
+    }
+    html,body{height:100%;overflow:hidden;font-family:var(--font);background:var(--bg);color:var(--text);}
+    canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;}
+    .split{display:flex;height:100vh;position:relative;z-index:1;}
 
-    {% if error == 'invalid' %}
-    <div class="auth-error"><i class="fa fa-circle-xmark"></i> Identifiants incorrects</div>
-    {% endif %}
-    {% if error == 'banned' %}
-    <div class="auth-error"><i class="fa fa-ban"></i> Compte banni</div>
-    {% endif %}
-    {% if error == 'suspended' %}
-    <div class="auth-error" style="background:rgba(251,191,36,0.1);border-color:rgba(251,191,36,0.3);color:#fbbf24;"><i class="fa fa-pause-circle"></i> Compte suspendu</div>
-    {% endif %}
-    {% if error == 'registration_closed' %}
-    <div class="auth-error" style="background:rgba(62,198,224,0.1);border-color:rgba(62,198,224,0.3);color:#3EC6E0;"><i class="fa fa-lock"></i> Inscriptions fermées</div>
-    {% endif %}
+    /* Panneau gauche — brand */
+    .brand-panel{
+      flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      padding:60px;position:relative;overflow:hidden;
+      background:linear-gradient(135deg,rgba(108,99,255,0.08) 0%,rgba(62,198,224,0.04) 50%,rgba(255,101,132,0.04) 100%);
+      border-right:1px solid var(--border);
+    }
+    .brand-panel::before{
+      content:'';position:absolute;width:600px;height:600px;
+      background:radial-gradient(circle,rgba(108,99,255,0.15) 0%,transparent 70%);
+      top:50%;left:50%;transform:translate(-50%,-50%);
+      animation:orbPulse 4s ease-in-out infinite;
+    }
+    @keyframes orbPulse{0%,100%{transform:translate(-50%,-50%) scale(1);}50%{transform:translate(-50%,-50%) scale(1.1);}}
+    .brand-logo{
+      width:80px;height:80px;border-radius:24px;
+      background:linear-gradient(135deg,var(--primary),var(--accent));
+      display:flex;align-items:center;justify-content:center;
+      font-size:36px;margin-bottom:28px;position:relative;
+      box-shadow:0 0 60px rgba(108,99,255,0.4);
+      animation:logoBounce .8s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    @keyframes logoBounce{from{transform:scale(0) rotate(-20deg);opacity:0;}to{transform:scale(1) rotate(0);opacity:1;}}
+    .brand-title{font-size:42px;font-weight:800;letter-spacing:-1px;position:relative;
+      background:linear-gradient(135deg,#fff 0%,rgba(108,99,255,0.9) 50%,var(--accent) 100%);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:12px;}
+    .brand-desc{font-size:15px;color:var(--text-muted);text-align:center;max-width:360px;line-height:1.7;position:relative;}
+    .brand-features{display:flex;flex-direction:column;gap:12px;margin-top:36px;position:relative;}
+    .brand-feat{display:flex;align-items:center;gap:12px;padding:12px 16px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;animation:mailItemIn .5s ease both;}
+    @keyframes mailItemIn{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+    .brand-feat i{color:var(--primary);width:18px;}
+    .brand-feat span{font-size:13px;color:var(--text-muted);}
 
-    <form method="post" action="/login" id="loginForm">
-      <div class="form-group">
-        <label class="form-label"><i class="fa fa-user"></i> Nom d'utilisateur</label>
-        <input class="form-input" type="text" name="username" placeholder="Votre identifiant" required autocomplete="username" />
+    /* Panneau droit — formulaire */
+    .form-panel{
+      width:480px;flex-shrink:0;display:flex;flex-direction:column;
+      align-items:center;justify-content:center;padding:60px 48px;
+      overflow-y:auto;
+    }
+    .form-card{width:100%;animation:formSlide .6s cubic-bezier(0.34,1.56,0.64,1);}
+    @keyframes formSlide{from{opacity:0;transform:translateX(40px);}to{opacity:1;transform:translateX(0);}}
+    .form-title{font-size:28px;font-weight:800;margin-bottom:6px;}
+    .form-sub{font-size:14px;color:var(--text-muted);margin-bottom:32px;}
+    .form-group{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;}
+    .form-label{font-size:13px;font-weight:500;color:var(--text-muted);}
+    .form-input{
+      width:100%;padding:12px 16px;background:rgba(255,255,255,0.05);
+      border:1px solid var(--border);border-radius:var(--radius);
+      color:var(--text);font-size:14px;font-family:var(--font);
+      outline:none;transition:var(--transition);
+    }
+    .form-input:focus{border-color:var(--border-glow);background:rgba(108,99,255,0.06);box-shadow:0 0 0 3px rgba(108,99,255,0.1);}
+    .input-wrap{position:relative;}
+    .input-icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--text-dim);font-size:14px;}
+    .input-wrap .form-input{padding-left:40px;}
+    .btn-primary{
+      width:100%;padding:13px;border:none;border-radius:var(--radius);
+      background:linear-gradient(135deg,var(--primary),var(--accent));
+      color:#fff;font-size:15px;font-weight:700;font-family:var(--font);
+      cursor:pointer;transition:var(--transition);letter-spacing:.3px;
+      position:relative;overflow:hidden;
+    }
+    .btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(108,99,255,0.4);}
+    .btn-primary:active{transform:translateY(0);}
+    .btn-primary::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,0.1),transparent);pointer-events:none;}
+    .error-box{
+      padding:12px 16px;background:rgba(255,101,132,0.1);
+      border:1px solid rgba(255,101,132,0.3);border-radius:var(--radius);
+      color:#ff6584;font-size:13px;display:flex;align-items:center;gap:10px;margin-bottom:16px;
+      animation:mailItemIn .3s ease;
+    }
+    .divider{display:flex;align-items:center;gap:12px;margin:20px 0;}
+    .divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border);}
+    .divider span{font-size:12px;color:var(--text-dim);}
+    .link-btn{color:var(--primary);text-decoration:none;font-size:13px;transition:var(--transition);}
+    .link-btn:hover{color:var(--accent);}
+
+    /* Ripple */
+    .ripple{position:absolute;border-radius:50%;background:rgba(255,255,255,0.3);animation:rippleAnim .6s ease-out forwards;pointer-events:none;}
+    @keyframes rippleAnim{from{width:0;height:0;opacity:0.5;transform:translate(-50%,-50%);}to{width:200px;height:200px;opacity:0;transform:translate(-50%,-50%);}}
+
+    @media(max-width:768px){
+      .brand-panel{display:none;}
+      .form-panel{width:100%;padding:40px 24px;}
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="particles"></canvas>
+
+<div class="split">
+
+  <!-- PANNEAU GAUCHE -->
+  <div class="brand-panel">
+    <div class="brand-logo"><i class="fa fa-envelope-open-text" style="color:#fff;"></i></div>
+    <div class="brand-title">{{ site_name }}</div>
+    <p class="brand-desc">Une boîte mail moderne, sécurisée et intelligente, conçue pour les professionnels.</p>
+    <div class="brand-features">
+      {% for icon, text in [
+        ('fa-robot','Intelligence artificielle intégrée (Groq AI)'),
+        ('fa-shield-halved','Chiffrement et confidentialité avancée'),
+        ('fa-bolt','Interface ultra-rapide et intuitive'),
+        ('fa-filter','Tri automatique et règles personnalisées'),
+        ('fa-clock','Snooze, follow-up, envoi programmé'),
+      ] %}
+      <div class="brand-feat" style="animation-delay:{{ loop.index * 80 }}ms">
+        <i class="fa {{ icon }}"></i>
+        <span>{{ text }}</span>
       </div>
-      <div class="form-group">
-        <label class="form-label"><i class="fa fa-lock"></i> Mot de passe</label>
-        <div class="input-with-toggle" style="position:relative;display:flex;align-items:center">
-          <input class="form-input" style="padding-right:48px" type="password" name="password" placeholder="••••••••" required autocomplete="current-password" id="pwdInput" />
-          <button type="button" onclick="togglePwd()" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:0">
-            <i class="fa fa-eye" id="eyeIcon"></i>
-          </button>
-        </div>
-      </div>
-      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px">
-        <i class="fa fa-arrow-right-to-bracket"></i> Se connecter
-      </button>
-    </form>
-
-    <div class="auth-footer">
-      <a href="/register"><i class="fa fa-user-plus"></i> Créer un compte</a>
+      {% endfor %}
     </div>
   </div>
+
+  <!-- PANNEAU DROIT -->
+  <div class="form-panel">
+    <div class="form-card">
+      <div class="form-title">Connexion</div>
+      <div class="form-sub">Accédez à votre boîte mail</div>
+
+      {% if error %}
+      <div class="error-box">
+        <i class="fa fa-circle-exclamation"></i>
+        {% if error == 'invalid' %}Identifiants incorrects.
+        {% elif error == 'banned' %}Votre compte est banni.
+        {% elif error == 'suspended' %}Votre compte est suspendu.
+        {% else %}{{ error }}{% endif %}
+      </div>
+      {% endif %}
+
+      <form method="post" action="/login" onsubmit="handleSubmit(event)">
+        <div class="form-group">
+          <label class="form-label">Nom d'utilisateur</label>
+          <div class="input-wrap">
+            <i class="fa fa-user input-icon"></i>
+            <input type="text" name="username" class="form-input" placeholder="votre_nom" required autofocus autocomplete="username">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Mot de passe</label>
+          <div class="input-wrap" style="position:relative;">
+            <i class="fa fa-lock input-icon"></i>
+            <input type="password" name="password" id="pwd" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+            <button type="button" onclick="togglePwd()" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-dim);cursor:pointer;" tabindex="-1"><i class="fa fa-eye" id="eye-icon"></i></button>
+          </div>
+        </div>
+        <div style="margin-bottom:24px;"></div>
+        <button type="submit" class="btn-primary" id="submit-btn" onclick="ripple(event)">
+          <span id="submit-txt"><i class="fa fa-arrow-right-to-bracket"></i> Se connecter</span>
+        </button>
+      </form>
+
+      <div class="divider"><span>ou</span></div>
+      <div style="text-align:center;">
+        <a href="/register" class="link-btn">Créer un compte <i class="fa fa-arrow-right"></i></a>
+      </div>
+    </div>
+  </div>
+
 </div>
+
 <script>
-function togglePwd(){
-  const i=document.getElementById('pwdInput'),e=document.getElementById('eyeIcon');
-  i.type=i.type==='password'?'text':'password';
-  e.className=i.type==='password'?'fa fa-eye':'fa fa-eye-slash';
+// ===== PARTICLES =====
+const canvas = document.getElementById('particles');
+const ctx = canvas.getContext('2d');
+const pts = [];
+const N = 60;
+
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+for (let i=0;i<N;i++) pts.push({
+  x: Math.random()*canvas.width, y: Math.random()*canvas.height,
+  vx:(Math.random()-.5)*.4, vy:(Math.random()-.5)*.4,
+  r: Math.random()*2+.5,
+  color: [`rgba(108,99,255,`, `rgba(62,198,224,`, `rgba(255,101,132,`][Math.floor(Math.random()*3)]
+});
+
+function animParticles() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  pts.forEach(p => {
+    p.x += p.vx; p.y += p.vy;
+    if (p.x<0||p.x>canvas.width) p.vx*=-1;
+    if (p.y<0||p.y>canvas.height) p.vy*=-1;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+    ctx.fillStyle = p.color + '0.6)';
+    ctx.fill();
+  });
+  pts.forEach((a,i) => pts.forEach((b,j) => {
+    if (j<=i) return;
+    const d = Math.hypot(a.x-b.x,a.y-b.y);
+    if (d<120) {
+      ctx.beginPath();
+      ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
+      ctx.strokeStyle = `rgba(108,99,255,${0.15*(1-d/120)})`;
+      ctx.lineWidth = .8;
+      ctx.stroke();
+    }
+  }));
+  requestAnimationFrame(animParticles);
+}
+animParticles();
+
+// ===== RIPPLE =====
+function ripple(e) {
+  const btn = document.getElementById('submit-btn');
+  const r = document.createElement('span');
+  r.className = 'ripple';
+  const rect = btn.getBoundingClientRect();
+  r.style.left = (e.clientX-rect.left)+'px';
+  r.style.top = (e.clientY-rect.top)+'px';
+  btn.appendChild(r);
+  setTimeout(()=>r.remove(), 700);
+}
+
+// ===== PWD TOGGLE =====
+function togglePwd() {
+  const p = document.getElementById('pwd');
+  const i = document.getElementById('eye-icon');
+  p.type = p.type==='password' ? 'text' : 'password';
+  i.className = p.type==='password' ? 'fa fa-eye' : 'fa fa-eye-slash';
+}
+
+// ===== SUBMIT ANIM =====
+function handleSubmit(e) {
+  const btn = document.getElementById('submit-txt');
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Connexion...';
 }
 </script>
-{% endblock %}
+</body>
+</html>

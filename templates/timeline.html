@@ -1,0 +1,122 @@
+{% extends 'base.html' %}
+{% block title %}Timeline — {{ site_name }}{% endblock %}
+{% block page_title %}<i class="fa fa-timeline" style="color:var(--primary)"></i> Timeline de conversation{% endblock %}
+
+{% block content %}
+<div style="display:grid;grid-template-columns:280px 1fr;gap:20px;">
+
+  <!-- RECHERCHE CONTACT -->
+  <div style="display:flex;flex-direction:column;gap:16px;">
+    <div class="card">
+      <div style="padding:18px 20px;border-bottom:1px solid var(--border);">
+        <h3 style="font-size:14px;font-weight:700;"><i class="fa fa-user" style="color:var(--primary)"></i> Contact</h3>
+      </div>
+      <div style="padding:16px;">
+        <div class="search-bar">
+          <input type="email" id="contact-input" class="form-input" placeholder="adresse@exemple.com" value="{{ contact }}">
+        </div>
+        <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:10px;" onclick="loadTimeline()">
+          <i class="fa fa-timeline"></i> Charger
+        </button>
+      </div>
+    </div>
+
+    <div class="card" id="contact-stats" style="display:none;">
+      <div style="padding:16px 20px;">
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">STATISTIQUES</div>
+        <div id="stats-content"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TIMELINE -->
+  <div class="card" style="overflow:hidden;">
+    <div style="padding:18px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;">
+      <h2 id="timeline-title" style="font-size:15px;font-weight:700;flex:1;">Historique des échanges</h2>
+      <span id="timeline-count" style="font-size:12px;color:var(--text-dim);"></span>
+    </div>
+    <div id="timeline-container" style="height:calc(100vh - 64px - 56px - 32px - 70px);overflow-y:auto;padding:24px;">
+      <div style="text-align:center;padding:80px;color:var(--text-dim);"><i class="fa fa-timeline" style="font-size:48px;opacity:.2;display:block;margin-bottom:16px;"></i>Entrez une adresse email et cliquez sur Charger</div>
+    </div>
+  </div>
+</div>
+
+<style>
+.tl-item{display:flex;gap:16px;margin-bottom:24px;animation:mailItemIn .4s ease;}
+.tl-bubble{max-width:75%;padding:14px 18px;border-radius:16px;font-size:13px;line-height:1.7;}
+.tl-sent .tl-bubble{background:linear-gradient(135deg,rgba(108,99,255,0.25),rgba(62,198,224,0.15));border:1px solid rgba(108,99,255,0.3);border-radius:16px 16px 4px 16px;margin-left:auto;}
+.tl-received .tl-bubble{background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:16px 16px 16px 4px;}
+.tl-date{font-size:11px;color:var(--text-dim);margin-top:4px;}
+.tl-subject{font-weight:600;font-size:13px;margin-bottom:4px;}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const contact = '{{ contact }}';
+  if (contact) loadTimeline();
+  document.getElementById('contact-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') loadTimeline();
+  });
+});
+
+async function loadTimeline() {
+  const contact = document.getElementById('contact-input').value.trim();
+  if (!contact) return showToast('Entrez une adresse email', 'error');
+  const container = document.getElementById('timeline-container');
+  container.innerHTML = Array(5).fill('<div class="skeleton-row"><div class="skeleton" style="width:40px;height:40px;border-radius:50%"></div><div style="flex:1"><div class="skeleton" style="height:12px;width:60%;margin-bottom:8px"></div><div class="skeleton" style="height:80px"></div></div></div>').join('');
+  const res = await fetch(`/api/timeline?contact=${encodeURIComponent(contact)}`);
+  const data = await res.json();
+  const items = data.timeline || [];
+  document.getElementById('timeline-count').textContent = `${items.length} message${items.length>1?'s':''}`;
+  document.getElementById('timeline-title').textContent = `Échanges avec ${contact}`;
+  if (!items.length) {
+    container.innerHTML = `<div style="text-align:center;padding:60px;color:var(--text-dim);"><i class="fa fa-envelope-open" style="font-size:40px;opacity:.2;display:block;margin-bottom:12px;"></i>Aucun échange trouvé avec ce contact.</div>`;
+    return;
+  }
+  // Stats
+  const sent = items.filter(i=>i.direction==='sent').length;
+  const received = items.length - sent;
+  document.getElementById('stats-content').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Envoyés</span><span style="font-size:13px;font-weight:600;color:var(--primary);">${sent}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Reçus</span><span style="font-size:13px;font-weight:600;color:var(--accent)">${received}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Total</span><span style="font-size:13px;font-weight:600;">${items.length}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Premier contact</span><span style="font-size:12px;">${fmtDate(items[0].received_at)}</span></div>
+    </div>`;
+  document.getElementById('contact-stats').style.display = 'block';
+
+  // Group by date
+  let lastDate = '';
+  container.innerHTML = '';
+  items.forEach((item, i) => {
+    const d = new Date(item.received_at);
+    const dateStr = d.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'});
+    if (dateStr !== lastDate) {
+      lastDate = dateStr;
+      const sep = document.createElement('div');
+      sep.style.cssText = 'text-align:center;margin:20px 0;position:relative;';
+      sep.innerHTML = `<span style="font-size:11px;color:var(--text-dim);background:var(--bg-card);padding:4px 16px;border-radius:20px;border:1px solid var(--border);position:relative;z-index:1;">${dateStr}</span><div style="position:absolute;top:50%;left:0;right:0;height:1px;background:var(--border);z-index:0;"></div>`;
+      container.appendChild(sep);
+    }
+    const isSent = item.direction === 'sent';
+    const div = document.createElement('div');
+    div.className = `tl-item ${isSent?'tl-sent':'tl-received'}`;
+    div.style.flexDirection = isSent ? 'row-reverse' : 'row';
+    div.style.animationDelay = `${i*40}ms`;
+    div.innerHTML = `
+      <div class="avatar avatar-sm" style="background:${isSent?'linear-gradient(135deg,var(--primary),var(--accent2))':'rgba(255,255,255,0.08)'};flex-shrink:0;">${isSent?'M':esc(contact[0].toUpperCase())}</div>
+      <div style="display:flex;flex-direction:column;${isSent?'align-items:flex-end':''}">
+        <div class="tl-bubble">
+          <div class="tl-subject">${esc(item.subject||'(Sans objet)')}</div>
+          <div style="font-size:12px;color:var(--text-muted);line-height:1.6;">${esc((item.body_text||item.body_html||'').slice(0,200))}${(item.body_text||item.body_html||'').length>200?'...':''}</div>
+        </div>
+        <div class="tl-date">${d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})} &bull; <a href="/mail/${item.id}" style="color:var(--primary);">Ouvrir</a></div>
+      </div>`;
+    container.appendChild(div);
+  });
+}
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function fmtDate(d){if(!d)return '';try{return new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'});}catch{return d;}}
+</script>
+{% endblock %}

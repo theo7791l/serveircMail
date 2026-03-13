@@ -1,0 +1,159 @@
+{% extends 'base.html' %}
+{% block title %}Tests système — {{ site_name }}{% endblock %}
+{% block page_title %}<i class="fa fa-flask" style="color:var(--primary)"></i> Tests de fonctionnalités{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:20px;">
+  <div class="card" style="padding:16px 20px;background:linear-gradient(135deg,rgba(108,99,255,0.1),rgba(62,198,224,0.05));border-color:rgba(108,99,255,0.25);">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <i class="fa fa-triangle-exclamation" style="color:var(--gold);font-size:18px;"></i>
+      <p style="font-size:13px;color:var(--text-muted);">Ces tests effectuent des opérations réelles sur la base de données, SMTP et les APIs. Utilisez-les uniquement en environnement de test.</p>
+      <button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="runAll()"><i class="fa fa-play"></i> Tout tester</button>
+    </div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;">
+  {% set tests = [
+    ('db_read', 'Base de données — Lecture', 'fa-database', 'Vérifie la lecture SQLite'),
+    ('db_write', 'Base de données — Écriture', 'fa-pen-to-square', 'Test INSERT + DELETE'),
+    ('auth_session', 'Auth — Session', 'fa-lock', 'Crée et valide une session'),
+    ('smtp', 'SMTP — Resend API', 'fa-envelope', 'Envoi test vers delivered@resend.dev'),
+    ('webhook', 'Webhook Inbound', 'fa-webhook', 'Test de connectivité webhook'),
+    ('create_delete_user', 'Création utilisateur', 'fa-user-plus', 'Crée puis supprime un user test'),
+    ('imap_folders', 'Dossiers IMAP', 'fa-folder', 'Récupère les dossiers disponibles'),
+    ('internal_send', 'Envoi interne', 'fa-paper-plane', 'Envoie un mail entre deux comptes locaux'),
+    ('groq_ai', 'Groq AI', 'fa-robot', 'Test de connexion à l\'API Groq'),
+    ('snooze', 'Snooze mail', 'fa-clock', 'Snooze un mail de test'),
+    ('rules', 'Règles de tri', 'fa-filter', 'Crée et supprime une règle test'),
+    ('followup', 'Follow-up tracker', 'fa-bell', 'Crée un follow-up et vérifie les alertes'),
+  ] %}
+
+  {% for test_id, test_name, test_icon, test_desc in tests %}
+  <div class="test-card" id="card-{{ test_id }}">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;">
+      <div class="test-icon-wrap">
+        <i class="fa {{ test_icon }} test-icon-i"></i>
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:14px;font-weight:700;">{{ test_name }}</div>
+        <div style="font-size:12px;color:var(--text-dim);">{{ test_desc }}</div>
+      </div>
+      <div id="badge-{{ test_id }}" class="test-badge idle"><i class="fa fa-minus"></i></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button class="btn btn-ghost btn-sm" onclick="runTest('{{ test_id }}')" id="btn-{{ test_id }}">
+        <i class="fa fa-play"></i> Tester
+      </button>
+      <span id="dur-{{ test_id }}" style="font-size:11px;color:var(--text-dim);"></span>
+      <span id="msg-{{ test_id }}" style="font-size:12px;color:var(--text-muted);flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+    </div>
+    <div id="log-{{ test_id }}" style="display:none;margin-top:12px;padding:10px 12px;background:rgba(0,0,0,0.3);border-radius:6px;font-size:11px;font-family:monospace;color:var(--text-muted);max-height:80px;overflow-y:auto;border:1px solid var(--border);"></div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- LOG GLOBAL -->
+<div class="card" style="margin-top:20px;">
+  <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;">
+    <h3 style="font-size:14px;font-weight:700;flex:1;"><i class="fa fa-terminal" style="color:var(--primary)"></i> Log live</h3>
+    <button class="btn btn-ghost btn-sm" onclick="clearLog()"><i class="fa fa-trash"></i></button>
+  </div>
+  <div id="global-log" style="padding:16px;font-family:monospace;font-size:12px;color:var(--text-muted);max-height:240px;overflow-y:auto;line-height:1.8;">En attente des tests...
+</div>
+</div>
+
+<style>
+.test-card{
+  background:rgba(255,255,255,0.03);border:1px solid var(--border);
+  border-radius:var(--radius-lg);padding:18px 20px;
+  transition:var(--transition);
+}
+.test-card:hover{border-color:var(--border-glow);}
+.test-card.running{border-color:rgba(108,99,255,0.5);animation:pulse 1.5s ease infinite;}
+.test-card.success{border-color:rgba(74,222,128,0.4);}
+.test-card.error{border-color:rgba(255,101,132,0.4);}
+.test-icon-wrap{
+  width:40px;height:40px;border-radius:10px;
+  background:linear-gradient(135deg,rgba(108,99,255,0.2),rgba(62,198,224,0.1));
+  display:flex;align-items:center;justify-content:center;
+}
+.test-icon-i{font-size:16px;color:var(--primary);}
+.test-badge{
+  width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:12px;transition:var(--transition);
+}
+.test-badge.idle{background:rgba(255,255,255,0.08);color:var(--text-dim);}
+.test-badge.running{background:rgba(108,99,255,0.2);color:var(--primary);animation:spin 1s linear infinite;}
+.test-badge.success{background:rgba(74,222,128,0.2);color:#4ade80;}
+.test-badge.error{background:rgba(255,101,132,0.2);color:var(--accent2);}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(108,99,255,0.3);}50%{box-shadow:0 0 0 6px rgba(108,99,255,0);}}
+@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+</style>
+
+<script>
+function log(msg, type='info') {
+  const colors = {info:'var(--text-muted)', success:'#4ade80', error:'var(--accent2)', warn:'var(--gold)'};
+  const el = document.getElementById('global-log');
+  const time = new Date().toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  el.innerHTML += `<span style="color:${colors[type]||colors.info}">[${time}] ${escHtml(msg)}</span>\n`;
+  el.scrollTop = el.scrollHeight;
+}
+function clearLog() { document.getElementById('global-log').textContent = 'Log effacé.\n'; }
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function runTest(testId) {
+  const card = document.getElementById(`card-${testId}`);
+  const badge = document.getElementById(`badge-${testId}`);
+  const btn = document.getElementById(`btn-${testId}`);
+  const dur = document.getElementById(`dur-${testId}`);
+  const msg = document.getElementById(`msg-${testId}`);
+  const logEl = document.getElementById(`log-${testId}`);
+
+  card.className = 'test-card running';
+  badge.className = 'test-badge running';
+  badge.innerHTML = '<i class="fa fa-rotate"></i>';
+  btn.disabled = true;
+  dur.textContent = '';
+  msg.textContent = 'Exécution...';
+  logEl.style.display = 'none';
+  log(`▶ Test "${testId}" démarré...`);
+
+  try {
+    const res = await fetch('/api/admin/run-test', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({test: testId})
+    });
+    const data = await res.json();
+    const ok = data.success;
+    card.className = `test-card ${ok?'success':'error'}`;
+    badge.className = `test-badge ${ok?'success':'error'}`;
+    badge.innerHTML = ok ? '<i class="fa fa-check"></i>' : '<i class="fa fa-xmark"></i>';
+    dur.textContent = data.duration_ms ? `${data.duration_ms}ms` : '';
+    msg.textContent = data.message || '';
+    msg.style.color = ok ? '#4ade80' : 'var(--accent2)';
+    logEl.style.display = 'block';
+    logEl.textContent = `[${ok?'OK':'FAIL'}] ${data.message}\nDurée: ${data.duration_ms}ms`;
+    log(`${ok?'✅':'❌'} ${testId}: ${data.message} (${data.duration_ms}ms)`, ok?'success':'error');
+  } catch(e) {
+    card.className = 'test-card error';
+    badge.className = 'test-badge error';
+    badge.innerHTML = '<i class="fa fa-xmark"></i>';
+    msg.textContent = 'Erreur réseau';
+    log(`❌ ${testId}: Erreur réseau — ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function runAll() {
+  const tests = ['db_read','db_write','auth_session','smtp','webhook','create_delete_user','imap_folders','internal_send','groq_ai','snooze','rules','followup'];
+  log('🚀 Lancement de tous les tests...', 'warn');
+  for (const t of tests) {
+    await runTest(t);
+    await new Promise(r => setTimeout(r, 300));
+  }
+  log('✓ Tous les tests terminés.', 'success');
+}
+</script>
+{% endblock %}

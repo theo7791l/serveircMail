@@ -1,0 +1,152 @@
+{% extends 'base.html' %}
+{% block title %}Règles de tri — {{ site_name }}{% endblock %}
+{% block page_title %}<i class="fa fa-filter" style="color:var(--primary)"></i> Règles de tri automatique{% endblock %}
+
+{% block content %}
+<div style="display:grid;grid-template-columns:1fr 380px;gap:20px;">
+
+  <!-- LISTE DES REGLES -->
+  <div class="card">
+    <div style="padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;">
+      <h2 style="font-size:15px;font-weight:700;flex:1;">Vos règles <span id="rules-count" style="font-size:12px;background:rgba(108,99,255,0.15);padding:2px 8px;border-radius:10px;color:var(--primary);">0</span></h2>
+      <button class="btn btn-ghost btn-sm" onclick="loadRules()"><i class="fa fa-rotate-right"></i></button>
+    </div>
+    <div id="rules-list" style="padding:16px;"></div>
+  </div>
+
+  <!-- FORMULAIRE CREATION -->
+  <div style="display:flex;flex-direction:column;gap:16px;">
+    <div class="card">
+      <div style="padding:18px 20px;border-bottom:1px solid var(--border);">
+        <h3 style="font-size:14px;font-weight:700;"><i class="fa fa-plus" style="color:var(--primary)"></i> Créer une règle</h3>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:14px;">
+        <div class="form-group">
+          <label class="form-label">Nom de la règle</label>
+          <input id="r-name" type="text" class="form-input" placeholder="Ex: Newsletters" >
+        </div>
+        <div class="form-group">
+          <label class="form-label">Si le champ</label>
+          <select id="r-field" class="form-input">
+            <option value="from">Expéditeur (From)</option>
+            <option value="subject">Objet (Subject)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Opérateur</label>
+          <select id="r-op" class="form-input">
+            <option value="contains">Contient</option>
+            <option value="equals">Est exactement</option>
+            <option value="starts_with">Commence par</option>
+            <option value="ends_with">Termine par</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Valeur</label>
+          <input id="r-val" type="text" class="form-input" placeholder="Ex: newsletter@, FACTURE">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Alors</label>
+          <select id="r-action" class="form-input" onchange="toggleActionValue(this.value)">
+            <option value="move_to_folder">Déplacer vers le dossier</option>
+            <option value="mark_read">Marquer comme lu</option>
+            <option value="star">Étoiler</option>
+            <option value="trash">Mettre à la corbeille</option>
+            <option value="spam">Marquer spam</option>
+          </select>
+        </div>
+        <div id="action-val-group" class="form-group">
+          <label class="form-label">Dossier cible</label>
+          <input id="r-action-val" type="text" class="form-input" placeholder="Ex: Newsletters">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Priorité (0 = haute)</label>
+          <input id="r-priority" type="number" class="form-input" value="0" min="0" max="100">
+        </div>
+        <button class="btn btn-primary" onclick="createRule()" style="width:100%;justify-content:center;">
+          <i class="fa fa-plus"></i> Créer la règle
+        </button>
+      </div>
+    </div>
+
+    <!-- LÉGENDE -->
+    <div class="card" style="padding:16px 20px;">
+      <div style="font-size:12px;color:var(--text-muted);">
+        <div style="font-weight:600;color:var(--text);margin-bottom:8px;"><i class="fa fa-lightbulb" style="color:var(--gold)"></i> Comment ça marche</div>
+        <p style="line-height:1.7;">Les règles s'appliquent automatiquement à chaque mail entrant via le webhook Resend. Elles sont traitées dans l'ordre de priorité (0 = plus haute).</p>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;align-items:center;gap:8px;"><span style="padding:2px 8px;border-radius:10px;background:rgba(108,99,255,0.15);color:var(--primary);font-size:11px;">contains</span> Le texte est présent n'importe où</div>
+          <div style="display:flex;align-items:center;gap:8px;"><span style="padding:2px 8px;border-radius:10px;background:rgba(62,198,224,0.15);color:var(--accent2);font-size:11px;">equals</span> Correspondance exacte</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.rule-card{background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;display:flex;align-items:center;gap:12px;transition:var(--transition);animation:mailItemIn .3s ease;}
+.rule-card:hover{border-color:var(--border-glow);background:var(--bg-card-hover);}
+.rule-tag{font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(108,99,255,0.12);color:var(--primary);}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', loadRules);
+
+async function loadRules() {
+  const res = await fetch('/api/rules');
+  const data = await res.json();
+  const list = document.getElementById('rules-list');
+  document.getElementById('rules-count').textContent = data.rules.length;
+  if (!data.rules.length) {
+    list.innerHTML = `<div style="text-align:center;padding:48px;color:var(--text-dim);"><i class="fa fa-filter" style="font-size:36px;opacity:.2;margin-bottom:12px;"></i><p style="font-size:13px;">Aucune règle configurée.</p></div>`;
+    return;
+  }
+  list.innerHTML = data.rules.map(r => `
+    <div class="rule-card" style="margin-bottom:10px;">
+      <div style="flex:1;">
+        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px;">${esc(r.name)}</div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span class="rule-tag">${esc(r.condition_field)}</span>
+          <span style="font-size:11px;color:var(--text-dim);">${esc(r.condition_operator)}</span>
+          <span class="rule-tag" style="background:rgba(62,198,224,0.12);color:var(--accent);">"${esc(r.condition_value)}"</span>
+          <span style="font-size:11px;color:var(--text-dim);">→</span>
+          <span class="rule-tag" style="background:rgba(74,222,128,0.1);color:#4ade80;">${esc(r.action_type)}${r.action_value?' : '+esc(r.action_value):''}</span>
+          <span style="font-size:10px;color:var(--text-dim);margin-left:auto;">priorité ${r.priority}</span>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="deleteRule(${r.id})" style="color:var(--accent2);"><i class="fa fa-trash"></i></button>
+    </div>`).join('');
+}
+
+function toggleActionValue(val) {
+  document.getElementById('action-val-group').style.display = val==='move_to_folder' ? 'block' : 'none';
+}
+
+async function createRule() {
+  const name = document.getElementById('r-name').value.trim();
+  const field = document.getElementById('r-field').value;
+  const op = document.getElementById('r-op').value;
+  const val = document.getElementById('r-val').value.trim();
+  const action = document.getElementById('r-action').value;
+  const actionVal = document.getElementById('r-action-val').value.trim();
+  const priority = parseInt(document.getElementById('r-priority').value) || 0;
+  if (!name || !val) return showToast('Nom et valeur requis', 'error');
+  const res = await fetch('/api/rules', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, condition_field:field, condition_operator:op, condition_value:val, action_type:action, action_value:actionVal, priority})
+  });
+  const data = await res.json();
+  if (data.success) { showToast('Règle créée ✓', 'success'); loadRules(); }
+  else showToast('Erreur', 'error');
+}
+
+async function deleteRule(id) {
+  if (!confirm('Supprimer cette règle ?')) return;
+  await fetch(`/api/rules/${id}`, {method:'DELETE'});
+  showToast('Règle supprimée', 'info');
+  loadRules();
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+</script>
+{% endblock %}
