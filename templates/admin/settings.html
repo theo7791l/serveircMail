@@ -4,43 +4,38 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">Paramètres <span>Système</span></h1>
-    <p class="page-subtitle">Configuration globale de serveircMail</p>
+    <p class="page-subtitle">Toute la configuration d'Awlor, sans toucher au .env</p>
   </div>
 </div>
 
 {% if request.query_params.get('success') %}
-<div style="background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.3);color:var(--accent3);padding:12px 18px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px;display:flex;align-items:center;gap:8px;">
+<div class="alert-success">
   <i class="fa fa-check-circle"></i> Paramètres sauvegardés avec succès !
 </div>
 {% endif %}
 
 <form method="post" action="/admin/settings">
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:20px;">
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:20px">
 
-  <!-- Général -->
+  <!-- ===== Général ===== -->
   <div class="card">
-    <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
-      <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--primary),var(--accent));display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,0.3);flex-shrink:0;">
-        <i class="fa fa-gear"></i>
-      </div>
-      <div>
-        <div style="font-size:15px;font-weight:700;color:var(--text);">Général</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Paramètres de base du site</div>
-      </div>
+    <div class="settings-card-header">
+      <div class="settings-icon" style="background:linear-gradient(135deg,var(--primary),var(--accent))"><i class="fa fa-gear"></i></div>
+      <div><div class="settings-card-title">Général</div><div class="settings-card-sub">Nom du site, inscriptions, maintenance</div></div>
     </div>
     <div class="card-body">
       <div class="form-group">
         <label class="form-label">Nom du site</label>
-        <input class="form-input" name="site_name" value="{{ settings.get('site_name','serveircMail') }}" placeholder="serveircMail" />
+        <input class="form-input" name="site_name" value="{{ settings.get('site_name','Awlor') }}" placeholder="Awlor" />
       </div>
       <div class="form-group">
         <label class="form-label">Nombre max d'utilisateurs</label>
-        <input class="form-input" type="number" name="max_users" value="{{ settings.get('max_users','100') }}" />
+        <input class="form-input" type="number" name="max_users" value="{{ settings.get('max_users','100') }}" min="1" />
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-top:1px solid rgba(255,255,255,0.05);">
+      <div class="toggle-row">
         <div>
-          <div style="font-size:14px;font-weight:600;color:var(--text);">Inscriptions ouvertes</div>
-          <div style="font-size:12px;color:var(--text-muted);">Permettre aux nouveaux users de s'inscrire</div>
+          <div class="toggle-label">Inscriptions ouvertes</div>
+          <div class="toggle-sub">Permettre aux nouveaux utilisateurs de s'inscrire</div>
         </div>
         <label class="toggle">
           <input type="hidden" name="allow_registration" value="0">
@@ -48,10 +43,10 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-top:1px solid rgba(255,255,255,0.05);">
+      <div class="toggle-row" style="border-top:1px solid var(--border)">
         <div>
-          <div style="font-size:14px;font-weight:600;color:var(--accent2);"><i class="fa fa-triangle-exclamation"></i> Mode maintenance</div>
-          <div style="font-size:12px;color:var(--text-muted);">Bloquer l'accès au site pour les users</div>
+          <div class="toggle-label" style="color:var(--accent2)"><i class="fa fa-triangle-exclamation"></i> Mode maintenance</div>
+          <div class="toggle-sub">Bloquer l'accès au site pour les utilisateurs</div>
         </div>
         <label class="toggle">
           <input type="hidden" name="maintenance_mode" value="0">
@@ -62,201 +57,240 @@
     </div>
   </div>
 
-  <!-- Domaine des alias mail -->
+  <!-- ===== Serveur / Hébergement ===== -->
   <div class="card">
-    <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
-      <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#f472b6,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,0.3);flex-shrink:0;">
-        <i class="fa fa-at"></i>
-      </div>
-      <div>
-        <div style="font-size:15px;font-weight:700;color:var(--text);">Domaine des alias mail</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Domaine proposé à l'inscription</div>
-      </div>
-    </div>
-    <div class="card-body">
-      <div class="form-group">
-        <label class="form-label"><i class="fa fa-globe"></i> Domaine mail</label>
-        <input class="form-input" name="mail_domain" value="{{ settings.get('mail_domain','') }}" placeholder="youtube.serveirc.com" />
-        <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Les users choisiront leur alias : <strong>prenom@youtube.serveirc.com</strong></div>
-      </div>
-      <div style="background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.25);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:flex-start;">
-        <i class="fa fa-circle-info" style="color:#a78bfa;margin-top:1px;"></i>
-        <span>Ce domaine doit être configuré avec <strong>ImprovMX</strong> (alias <code>*</code> → ton Gmail) pour la réception.</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- IMAP (Réception) -->
-  <div class="card">
-    <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
-      <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#7df3ff);display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,0.3);flex-shrink:0;">
-        <i class="fa fa-download"></i>
-      </div>
-      <div>
-        <div style="font-size:15px;font-weight:700;color:var(--text);">Réception <span style="font-size:11px;background:rgba(62,198,224,0.15);color:var(--accent);padding:2px 8px;border-radius:20px;margin-left:6px;">IMAP</span></div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Compte Gmail pour lire les mails (via ImprovMX forward)</div>
-      </div>
+    <div class="settings-card-header">
+      <div class="settings-icon" style="background:linear-gradient(135deg,#4ade80,#22d3ee)"><i class="fa fa-server"></i></div>
+      <div><div class="settings-card-title">Serveur &amp; Hébergement</div><div class="settings-card-sub">Port, base de données, compte super-admin</div></div>
     </div>
     <div class="card-body">
       <div class="grid-2">
         <div class="form-group">
-          <label class="form-label">IMAP Host</label>
-          <input class="form-input" name="global_imap_host" value="{{ settings.get('global_imap_host','imap.gmail.com') }}" placeholder="imap.gmail.com" />
+          <label class="form-label"><i class="fa fa-plug"></i> Port HTTP</label>
+          <input class="form-input" type="number" name="app_port" value="{{ settings.get('app_port','15431') }}" placeholder="15431" />
+          <small class="form-hint">Nécessite un redémarrage du serveur</small>
         </div>
         <div class="form-group">
-          <label class="form-label">IMAP Port</label>
-          <input class="form-input" type="number" name="global_imap_port" value="{{ settings.get('global_imap_port','993') }}" />
+          <label class="form-label"><i class="fa fa-database"></i> Chemin de la BDD</label>
+          <input class="form-input" name="db_path" value="{{ settings.get('db_path','/home/container/awlor.db') }}" placeholder="/home/container/awlor.db" />
+          <small class="form-hint">Chemin absolu vers le fichier SQLite</small>
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label"><i class="fa fa-at"></i> Adresse Gmail</label>
-        <input class="form-input" name="global_imap_user" value="{{ settings.get('global_imap_user','') }}" placeholder="toncompte@gmail.com" />
-        <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Ce compte reçoit tous les mails via ImprovMX forward</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label"><i class="fa fa-key"></i> App Password Gmail</label>
-        <div style="position:relative;display:flex;align-items:center;">
-          <input class="form-input" style="padding-right:48px;" type="password" name="global_mail_password" id="imapPwd" value="{{ settings.get('global_mail_password','') }}" placeholder="App Password 16 caractères" />
-          <button type="button" onclick="togglePwd('imapPwd','imapPwdEye')" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;">
-            <i class="fa fa-eye" id="imapPwdEye"></i>
+        <label class="form-label"><i class="fa fa-key"></i> Secret Key (sessions)</label>
+        <div style="position:relative;display:flex;align-items:center">
+          <input class="form-input" style="padding-right:48px" type="password" name="secret_key" id="secretKeyInput" value="{{ settings.get('secret_key','') }}" placeholder="Clé secrète longue et aléatoire" />
+          <button type="button" onclick="togglePwd('secretKeyInput','secretKeyEye')" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:0">
+            <i class="fa fa-eye" id="secretKeyEye"></i>
           </button>
         </div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">
-          <i class="fa fa-circle-info"></i> Génère-le sur <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--primary);">myaccount.google.com/apppasswords</a>
+        <small class="form-hint">Utilisée pour signer les cookies de session. Ne pas changer en production.</small>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:4px">
+        <p style="font-size:12px;font-weight:700;color:var(--text-muted);letter-spacing:.05em;text-transform:uppercase;margin-bottom:12px">Compte Super Admin</p>
+        <div class="grid-2">
+          <div class="form-group">
+            <label class="form-label">Nom d'utilisateur</label>
+            <input class="form-input" name="super_admin_username" value="{{ settings.get('super_admin_username','admin') }}" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Mot de passe</label>
+            <div style="position:relative;display:flex;align-items:center">
+              <input class="form-input" style="padding-right:48px" type="password" name="super_admin_password" id="saPass" value="{{ settings.get('super_admin_password','') }}" placeholder="••••••••" />
+              <button type="button" onclick="togglePwd('saPass','saPassEye')" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:0">
+                <i class="fa fa-eye" id="saPassEye"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email Super Admin</label>
+          <input class="form-input" name="super_admin_email" value="{{ settings.get('super_admin_email','admin@awlor.online') }}" />
         </div>
       </div>
-      <button type="button" class="btn btn-ghost" onclick="testImap()" id="testImapBtn" style="margin-top:4px;">
-        <i class="fa fa-plug"></i> Tester la connexion IMAP
-      </button>
-      <div id="testImapResult" style="display:none;margin-top:12px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm);"></div>
     </div>
   </div>
 
-  <!-- SMTP (Envoi Mailtrap) -->
+  <!-- ===== Domaine mail ===== -->
   <div class="card">
-    <div style="padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);">
-      <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#f97316);display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,0.3);flex-shrink:0;">
-        <i class="fa fa-upload"></i>
-      </div>
-      <div>
-        <div style="font-size:15px;font-weight:700;color:var(--text);">Envoi <span style="font-size:11px;background:rgba(245,158,11,0.15);color:#f59e0b;padding:2px 8px;border-radius:20px;margin-left:6px;">SMTP — Mailtrap</span></div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Envoyer des mails avec le bon alias (From:)</div>
-      </div>
+    <div class="settings-card-header">
+      <div class="settings-icon" style="background:linear-gradient(135deg,#f472b6,#a78bfa)"><i class="fa fa-at"></i></div>
+      <div><div class="settings-card-title">Domaine mail</div><div class="settings-card-sub">Adresses @awlor.online attribuées aux comptes</div></div>
     </div>
     <div class="card-body">
-      <div class="grid-2">
-        <div class="form-group">
-          <label class="form-label">SMTP Host</label>
-          <input class="form-input" name="global_smtp_host" value="{{ settings.get('global_smtp_host','live.smtp.mailtrap.io') }}" placeholder="live.smtp.mailtrap.io" />
+      <div class="form-group">
+        <label class="form-label"><i class="fa fa-globe"></i> Domaine</label>
+        <input class="form-input" name="mail_domain" value="{{ settings.get('mail_domain','awlor.online') }}" placeholder="awlor.online" />
+        <small class="form-hint">Les utilisateurs choisiront leur alias : <strong>prenom.nom@awlor.online</strong></small>
+      </div>
+      <div class="info-box" style="--box-color:#a78bfa">
+        <i class="fa fa-circle-info" style="color:#a78bfa"></i>
+        <span>Ce domaine doit être vérifié dans <strong>Resend</strong> avec les enregistrements <strong>MX, SPF et DKIM</strong> pour la réception et l'envoi.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Resend SMTP ===== -->
+  <div class="card">
+    <div class="settings-card-header">
+      <div class="settings-icon" style="background:linear-gradient(135deg,#f59e0b,#f97316)"><i class="fa fa-paper-plane"></i></div>
+      <div><div class="settings-card-title">Resend <span class="badge-inline">SMTP</span></div><div class="settings-card-sub">Envoi de mails via smtp.resend.com</div></div>
+    </div>
+    <div class="card-body">
+      <div class="form-group">
+        <div style="display:flex;gap:10px">
+          <div style="flex:1">
+            <label class="form-label">SMTP Host</label>
+            <input class="form-input" value="smtp.resend.com" disabled style="opacity:.5;cursor:not-allowed" />
+          </div>
+          <div style="width:90px">
+            <label class="form-label">Port</label>
+            <input class="form-input" value="587" disabled style="opacity:.5;cursor:not-allowed" />
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">SMTP Port</label>
-          <input class="form-input" type="number" name="global_smtp_port" value="{{ settings.get('global_smtp_port','587') }}" />
-        </div>
+        <small class="form-hint">Resend utilise toujours <code>smtp.resend.com:587</code> avec STARTTLS</small>
       </div>
       <div class="form-group">
-        <label class="form-label">Chiffrement SMTP</label>
-        <select class="form-select" name="global_smtp_encryption">
-          <option value="TLS" {{ 'selected' if settings.get('global_smtp_encryption','TLS') == 'TLS' }}>STARTTLS (port 587) — recommandé Mailtrap</option>
-          <option value="SSL" {{ 'selected' if settings.get('global_smtp_encryption','TLS') == 'SSL' }}>SSL (port 465)</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label"><i class="fa fa-user"></i> SMTP Username</label>
-        <input class="form-input" name="global_smtp_user" value="{{ settings.get('global_smtp_user','api') }}" placeholder="api" />
-        <div style="font-size:11px;color:var(--text-muted);margin-top:6px;"><i class="fa fa-circle-info"></i> Pour Mailtrap, le username est toujours <code>api</code></div>
-      </div>
-      <div class="form-group">
-        <label class="form-label"><i class="fa fa-key"></i> SMTP Password (clé API Mailtrap)</label>
-        <div style="position:relative;display:flex;align-items:center;">
-          <input class="form-input" style="padding-right:48px;" type="password" name="global_smtp_password" id="smtpPwd" value="{{ settings.get('global_smtp_password','') }}" placeholder="Clé API Mailtrap" />
-          <button type="button" onclick="togglePwd('smtpPwd','smtpPwdEye')" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;">
+        <label class="form-label"><i class="fa fa-key"></i> Clé API Resend</label>
+        <div style="position:relative;display:flex;align-items:center">
+          <input class="form-input" style="padding-right:48px" type="password" name="global_smtp_password" id="smtpPwd" value="{{ settings.get('global_smtp_password','') }}" placeholder="re_xxxxxxxxxxxxxxxxxxxx" />
+          <button type="button" onclick="togglePwd('smtpPwd','smtpPwdEye')" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:0">
             <i class="fa fa-eye" id="smtpPwdEye"></i>
           </button>
         </div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">
-          <i class="fa fa-circle-info"></i> Récupère ta clé sur <a href="https://mailtrap.io" target="_blank" style="color:var(--primary);">mailtrap.io</a> → Email API/SMTP → Settings
-        </div>
+        <small class="form-hint">
+          Récupère ta clé sur <a href="https://resend.com/api-keys" target="_blank" style="color:var(--primary)">resend.com/api-keys</a>
+        </small>
       </div>
-      <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.2);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;">
-        <i class="fa fa-triangle-exclamation" style="color:#f59e0b;margin-top:1px;"></i>
-        <span>Le domaine de tes alias (ex: <code>serveirc.com</code>) doit être vérifié dans Mailtrap → <strong>Email API/SMTP → Domains</strong> avec les enregistrements SPF + DKIM.</span>
+      <div class="form-group">
+        <label class="form-label"><i class="fa fa-link"></i> URL Webhook Inbound</label>
+        <input class="form-input" name="webhook_url" value="{{ settings.get('webhook_url','https://awlor.online/webhook/inbound') }}" placeholder="https://awlor.online/webhook/inbound" />
+        <small class="form-hint">Configure cette URL dans Resend &rarr; Receiving &rarr; Inbound</small>
+      </div>
+      <div class="info-box" style="--box-color:#f59e0b;margin-bottom:14px">
+        <i class="fa fa-triangle-exclamation" style="color:#f59e0b"></i>
+        <span>Le domaine <strong>awlor.online</strong> doit être vérifié dans Resend → Domains avant de pouvoir envoyer.</span>
       </div>
       <button type="button" class="btn btn-ghost" onclick="testSmtp()" id="testSmtpBtn">
-        <i class="fa fa-paper-plane"></i> Tester l'envoi SMTP
+        <i class="fa fa-plug"></i> Tester la connexion Resend
       </button>
-      <div id="testSmtpResult" style="display:none;margin-top:12px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm);"></div>
+      <div id="testSmtpResult" style="display:none;margin-top:12px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm)"></div>
+    </div>
+  </div>
+
+  <!-- ===== Resend Inbound ===== -->
+  <div class="card">
+    <div class="settings-card-header">
+      <div class="settings-icon" style="background:linear-gradient(135deg,var(--accent),#7df3ff)"><i class="fa fa-inbox"></i></div>
+      <div><div class="settings-card-title">Réception <span class="badge-inline" style="background:rgba(62,198,224,.15);color:var(--accent)">Inbound</span></div><div class="settings-card-sub">Webhook Resend pour les mails entrants</div></div>
+    </div>
+    <div class="card-body">
+      <div class="info-box" style="--box-color:#3ec6e0">
+        <i class="fa fa-circle-info" style="color:#3ec6e0"></i>
+        <div>
+          <strong>Configuration Resend</strong><br>
+          <ol style="margin:8px 0 0 16px;padding:0;font-size:12px;line-height:1.8">
+            <li>Va sur <a href="https://resend.com/domains" target="_blank" style="color:var(--primary)">resend.com/domains</a> et vérifie <strong>awlor.online</strong></li>
+            <li>Ajoute les DNS MX, SPF, DKIM indiqués par Resend</li>
+            <li>Va dans <a href="https://resend.com/inbound" target="_blank" style="color:var(--primary)">Receiving</a> et configure l'URL webhook ci-dessus</li>
+          </ol>
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:16px">
+        <label class="form-label"><i class="fa fa-shield-halved"></i> Clé de signature webhook <span style="color:var(--text-dim);font-weight:400">(optionnel)</span></label>
+        <div style="position:relative;display:flex;align-items:center">
+          <input class="form-input" style="padding-right:48px" type="password" name="webhook_secret" id="webhookSecret" value="{{ settings.get('webhook_secret','') }}" placeholder="Signing secret Resend" />
+          <button type="button" onclick="togglePwd('webhookSecret','webhookSecretEye')" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:0">
+            <i class="fa fa-eye" id="webhookSecretEye"></i>
+          </button>
+        </div>
+        <small class="form-hint">Si renseigné, chaque requête webhook sera vérifiée via HMAC-SHA256</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Sécurité ===== -->
+  <div class="card">
+    <div class="settings-card-header">
+      <div class="settings-icon" style="background:linear-gradient(135deg,#FF6584,#f97316)"><i class="fa fa-shield-halved"></i></div>
+      <div><div class="settings-card-title">Sécurité</div><div class="settings-card-sub">Durée de session, vérification email</div></div>
+    </div>
+    <div class="card-body">
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="form-label">Durée de session (jours)</label>
+          <input class="form-input" type="number" name="session_days" value="{{ settings.get('session_days','7') }}" min="1" max="365" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Expiration code vérif (min)</label>
+          <input class="form-input" type="number" name="verify_code_expiry" value="{{ settings.get('verify_code_expiry','15') }}" min="5" max="60" />
+        </div>
+      </div>
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Vérification email obligatoire</div>
+          <div class="toggle-sub">Envoyer un code de vérification à l'inscription</div>
+        </div>
+        <label class="toggle">
+          <input type="hidden" name="require_email_verification" value="0">
+          <input type="checkbox" name="require_email_verification" value="1" {{ 'checked' if settings.get('require_email_verification','1') == '1' }}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
     </div>
   </div>
 
 </div>
 
-<div style="display:flex;justify-content:flex-end;margin-top:24px;">
+<div style="display:flex;justify-content:flex-end;margin-top:24px">
   <button type="submit" class="btn btn-primary btn-lg"><i class="fa fa-floppy-disk"></i> Sauvegarder les paramètres</button>
 </div>
 </form>
 
+<style>
+.settings-card-header{padding:20px 24px 16px;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border)}
+.settings-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:18px;color:white;box-shadow:0 4px 20px rgba(0,0,0,.3);flex-shrink:0}
+.settings-card-title{font-size:15px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px}
+.settings-card-sub{font-size:12px;color:var(--text-muted);margin-top:2px}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:14px 0}
+.toggle-label{font-size:14px;font-weight:600;color:var(--text)}
+.toggle-sub{font-size:12px;color:var(--text-muted)}
+.form-hint{font-size:11px;color:var(--text-dim);margin-top:5px;display:block}
+.info-box{background:rgba(0,0,0,.15);border:1px solid rgba(255,255,255,.08);border-radius:var(--radius-sm);padding:12px 16px;font-size:12px;color:var(--text-muted);display:flex;gap:10px;align-items:flex-start}
+.badge-inline{font-size:11px;background:rgba(245,158,11,.15);color:#f59e0b;padding:2px 8px;border-radius:20px;margin-left:4px;font-weight:600}
+.alert-success{background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.3);color:var(--accent3);padding:12px 18px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px;display:flex;align-items:center;gap:8px}
+</style>
+
 <script>
-function togglePwd(inputId, eyeId) {
-  const i = document.getElementById(inputId), e = document.getElementById(eyeId);
-  i.type = i.type === 'password' ? 'text' : 'password';
-  e.className = i.type === 'password' ? 'fa fa-eye' : 'fa fa-eye-slash';
+function togglePwd(inputId, eyeId){
+  const i=document.getElementById(inputId),e=document.getElementById(eyeId);
+  i.type=i.type==='password'?'text':'password';
+  e.className=i.type==='password'?'fa fa-eye':'fa fa-eye-slash';
 }
 
-async function testImap() {
-  const btn = document.getElementById('testImapBtn');
-  const res = document.getElementById('testImapResult');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Test en cours...';
-  res.style.display = 'none';
-  try {
-    const r = await fetch('/api/admin/test-imap-connection', {method:'POST'});
-    const d = await r.json();
-    res.style.display = 'block';
-    if (d.success) {
-      res.style.background = 'rgba(74,222,128,0.1)';
-      res.style.border = '1px solid rgba(74,222,128,0.3)';
-      res.style.color = 'var(--accent3)';
-      res.innerHTML = '<i class="fa fa-check-circle"></i> Connexion IMAP réussie ! ' + (d.mailbox || '');
-    } else {
-      res.style.background = 'rgba(239,68,68,0.1)';
-      res.style.border = '1px solid rgba(239,68,68,0.3)';
-      res.style.color = 'var(--accent2)';
-      res.innerHTML = '<i class="fa fa-circle-xmark"></i> Erreur : ' + (d.error || 'Connexion impossible');
+async function testSmtp(){
+  const btn=document.getElementById('testSmtpBtn');
+  const res=document.getElementById('testSmtpResult');
+  btn.disabled=true;
+  btn.innerHTML='<i class="fa fa-circle-notch fa-spin"></i> Test en cours...';
+  res.style.display='none';
+  try{
+    const r=await fetch('/api/admin/test-smtp-connection',{method:'POST'});
+    const d=await r.json();
+    res.style.display='block';
+    if(d.success){
+      res.style.cssText='display:block;background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);color:var(--accent3);margin-top:12px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm)';
+      res.innerHTML='<i class="fa fa-check-circle"></i> '+d.message;
+    }else{
+      res.style.cssText='display:block;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--accent2);margin-top:12px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm)';
+      res.innerHTML='<i class="fa fa-circle-xmark"></i> Erreur : '+(d.error||'Connexion impossible');
     }
-  } catch(e) {
-    res.style.display='block'; res.innerHTML='<i class="fa fa-circle-xmark"></i> Erreur réseau';
+  }catch(e){
+    res.style.display='block';
+    res.innerHTML='<i class="fa fa-circle-xmark"></i> Erreur réseau';
   }
-  btn.disabled = false;
-  btn.innerHTML = '<i class="fa fa-plug"></i> Tester la connexion IMAP';
-}
-
-async function testSmtp() {
-  const btn = document.getElementById('testSmtpBtn');
-  const res = document.getElementById('testSmtpResult');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Test en cours...';
-  res.style.display = 'none';
-  try {
-    const r = await fetch('/api/admin/test-smtp-connection', {method:'POST'});
-    const d = await r.json();
-    res.style.display = 'block';
-    if (d.success) {
-      res.style.background = 'rgba(74,222,128,0.1)';
-      res.style.border = '1px solid rgba(74,222,128,0.3)';
-      res.style.color = 'var(--accent3)';
-      res.innerHTML = '<i class="fa fa-check-circle"></i> Connexion SMTP Mailtrap réussie !';
-    } else {
-      res.style.background = 'rgba(239,68,68,0.1)';
-      res.style.border = '1px solid rgba(239,68,68,0.3)';
-      res.style.color = 'var(--accent2)';
-      res.innerHTML = '<i class="fa fa-circle-xmark"></i> Erreur : ' + (d.error || 'Connexion impossible');
-    }
-  } catch(e) {
-    res.style.display='block'; res.innerHTML='<i class="fa fa-circle-xmark"></i> Erreur réseau';
-  }
-  btn.disabled = false;
-  btn.innerHTML = '<i class="fa fa-paper-plane"></i> Tester l\'envoi SMTP';
+  btn.disabled=false;
+  btn.innerHTML='<i class="fa fa-plug"></i> Tester la connexion Resend';
 }
 </script>
 {% endblock %}

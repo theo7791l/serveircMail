@@ -4,6 +4,7 @@ import secrets
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 
+# Le DB_PATH est bootstrappé depuis l'env, mais peut être surchargé en BDD
 DB_PATH = os.getenv("DB_PATH", "/home/container/awlor.db")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -173,13 +174,29 @@ def init_db():
             for perm in perms:
                 c.execute("INSERT OR IGNORE INTO role_permissions (role_id, permission_key) VALUES (?,?)", (row["id"], perm))
 
+    # Toutes les clés configurables depuis le panel (valeurs initialisées depuis .env au premier démarrage)
     defaults = [
         ("allow_registration", "1"),
         ("maintenance_mode", "0"),
         ("site_name", "Awlor"),
         ("max_users", "100"),
+        # Mail
+        ("mail_domain", os.getenv("MAIL_DOMAIN", "awlor.online")),
         ("global_smtp_password", os.getenv("SMTP_PASSWORD", "")),
-        ("mail_domain", os.getenv("MAIL_DOMAIN", "")),
+        ("webhook_url", os.getenv("WEBHOOK_URL", "https://awlor.online/webhook/inbound")),
+        ("webhook_secret", os.getenv("WEBHOOK_SECRET", "")),
+        # Serveur
+        ("app_port", os.getenv("PORT", "15431")),
+        ("db_path", os.getenv("DB_PATH", "/home/container/awlor.db")),
+        ("secret_key", os.getenv("SECRET_KEY", secrets.token_urlsafe(48))),
+        # Super admin
+        ("super_admin_username", os.getenv("SUPER_ADMIN_USERNAME", "admin")),
+        ("super_admin_password", os.getenv("SUPER_ADMIN_PASSWORD", "admin1234")),
+        ("super_admin_email", os.getenv("SUPER_ADMIN_EMAIL", "admin@awlor.online")),
+        # Sécurité
+        ("session_days", "7"),
+        ("verify_code_expiry", "15"),
+        ("require_email_verification", "1"),
     ]
     for k, v in defaults:
         c.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES (?,?)", (k, v))
@@ -189,9 +206,10 @@ def init_db():
     _create_super_admin()
 
 def _create_super_admin():
-    sa_user = os.getenv("SUPER_ADMIN_USERNAME", "admin")
-    sa_pass = os.getenv("SUPER_ADMIN_PASSWORD", "admin1234")
-    sa_email = os.getenv("SUPER_ADMIN_EMAIL", "admin@awlor.local")
+    """Crée le super admin en lisant les valeurs depuis la BDD (priorité) puis le .env."""
+    sa_user = get_setting("super_admin_username") or os.getenv("SUPER_ADMIN_USERNAME", "admin")
+    sa_pass = get_setting("super_admin_password") or os.getenv("SUPER_ADMIN_PASSWORD", "admin1234")
+    sa_email = get_setting("super_admin_email") or os.getenv("SUPER_ADMIN_EMAIL", "admin@awlor.online")
     conn = get_conn()
     c = conn.cursor()
     exists = c.execute("SELECT id FROM users WHERE username=?", (sa_user,)).fetchone()
@@ -365,7 +383,8 @@ def create_pending_user(username, display_name, email, password, mail_alias):
     conn.execute("DELETE FROM pending_users WHERE email=?", (email,))
     code = str(secrets.randbelow(900000) + 100000)
     hashed = _hash_password(password)
-    expires = (datetime.utcnow() + timedelta(minutes=15)).isoformat()
+    expiry_minutes = int(get_setting("verify_code_expiry", "15"))
+    expires = (datetime.utcnow() + timedelta(minutes=expiry_minutes)).isoformat()
     conn.execute(
         "INSERT INTO pending_users (username, display_name, email, password_hash, mail_alias, verification_code, expires_at) VALUES (?,?,?,?,?,?,?)",
         (username, display_name, email, hashed, mail_alias, code, expires)
@@ -411,7 +430,9 @@ def confirm_pending_user(email: str, code: str):
 
 # ========== SESSIONS ==========
 
-def create_session(user_id: int, days: int = 7) -> str:
+def create_session(user_id: int, days: int = None) -> str:
+    if days is None:
+        days = int(get_setting("session_days", "7"))
     token = secrets.token_urlsafe(48)
     expires = (datetime.utcnow() + timedelta(days=days)).isoformat()
     conn = get_conn()
