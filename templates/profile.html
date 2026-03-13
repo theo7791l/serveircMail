@@ -80,7 +80,13 @@
         </div>
         <div class="form-group">
           <label class="form-label">Mot de passe IMAP/SMTP <span style="color:var(--text-dim);font-size:10px;">(boîte mail)</span></label>
-          <input class="form-input" type="password" name="mail_password" value="{{ current_user.mail_password }}" placeholder="Mot de passe boîte mail" />
+          {# Accès sécurisé : current_user peut être un dict Python ou un sqlite3.Row #}
+          {% if current_user is mapping %}
+            {% set mail_pwd = current_user.get('mail_password', '') %}
+          {% else %}
+            {% set mail_pwd = '' %}
+          {% endif %}
+          <input class="form-input" type="password" name="mail_password" value="{{ mail_pwd }}" placeholder="Mot de passe boîte mail" />
         </div>
         <button type="submit" class="btn btn-primary"><i class="fa fa-floppy-disk"></i> Enregistrer les modifications</button>
       </form>
