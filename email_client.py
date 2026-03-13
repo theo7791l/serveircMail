@@ -40,12 +40,17 @@ def get_folders(user: dict):
 
 def get_mails(user: dict, folder: str = 'INBOX', page: int = 1, per_page: int = 20,
               address: str = None, filter_type: str = ''):
-    from database import get_inbound_mails, get_inbound_mails_multi, get_all_addresses_for_user
-    if address:
-        return get_inbound_mails(mail_to=address, folder=folder, page=page, per_page=per_page)
-    addresses = get_all_addresses_for_user(user['id'])
-    return get_inbound_mails_multi(addresses=addresses, folder=folder, page=page,
-                                   per_page=per_page, filter_type=filter_type)
+    try:
+        from database import get_inbound_mails, get_inbound_mails_multi, get_all_addresses_for_user
+        if address:
+            return get_inbound_mails(mail_to=address, folder=folder, page=page, per_page=per_page)
+        addresses = get_all_addresses_for_user(user['id'])
+        return get_inbound_mails_multi(addresses=addresses, folder=folder, page=page,
+                                       per_page=per_page, filter_type=filter_type)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {'error': str(e), 'mails': [], 'pages': 1, 'page': 1, 'total': 0}
 
 
 def get_mail(user: dict, uid: str, folder: str = 'INBOX'):

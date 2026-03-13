@@ -729,8 +729,16 @@ async def api_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20,
         user_addrs = db.get_all_addresses_for_user(user["id"])
         if address.lower() not in [a.lower() for a in user_addrs]:
             raise HTTPException(403, detail="Cette adresse ne vous appartient pas")
-    return email_client.get_mails(user, folder=folder, page=page, per_page=per_page,
-                                  address=address if address else None, filter_type=filter)
+    try:
+        result = email_client.get_mails(user, folder=folder, page=page, per_page=per_page,
+                                        address=address if address else None, filter_type=filter)
+        if isinstance(result, dict) and result.get("error"):
+            return JSONResponse({"error": result["error"], "mails": [], "pages": 1, "page": 1, "total": 0}, status_code=200)
+        return result
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e), "mails": [], "pages": 1, "page": 1, "total": 0}, status_code=200)
 
 @app.get("/api/mail/{uid}")
 async def api_mail(uid: int, user=Depends(auth.require_auth)):
