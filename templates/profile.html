@@ -9,6 +9,12 @@
 </div>
 {% endif %}
 
+{% if request.query_params.get('notif_saved') %}
+<div style="background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.3);color:var(--accent3);padding:12px 18px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px;display:flex;align-items:center;gap:8px;">
+  <i class="fa fa-bell"></i> Préférences de notification enregistrées !
+</div>
+{% endif %}
+
 <div class="grid-2">
 
   <!-- Info utilisateur -->
@@ -82,4 +88,196 @@
   </div>
 
 </div>
+
+<!-- Préférences de notification -->
+<div class="card" style="margin-top:24px;">
+  <div class="card-body">
+    <h3 style="font-size:15px;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+      <i class="fa fa-bell" style="color:var(--primary);"></i> Préférences de notification
+    </h3>
+    <p style="font-size:12px;color:var(--text-dim);margin-bottom:20px;">Choisissez quand Awlor vous envoie des alertes par email sur votre adresse principale.</p>
+
+    <form method="post" action="/api/notifications/prefs" id="notif-prefs-form">
+      <div style="display:flex;flex-direction:column;gap:0;">
+
+        <!-- Nouveau mail -->
+        <div class="notif-row">
+          <div style="display:flex;align-items:center;gap:12px;flex:1;">
+            <div style="width:36px;height:36px;border-radius:10px;background:rgba(108,99,255,0.15);display:flex;align-items:center;justify-content:center;">
+              <i class="fa fa-envelope" style="color:var(--primary);font-size:14px;"></i>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text);">Nouveau mail reçu</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">Reçois une alerte dès qu'un email arrive dans ta boîte</div>
+            </div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" name="notify_new_mail" value="1" {% if notif_prefs.notify_new_mail %}checked{% endif %} />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <!-- Digest hebdomadaire -->
+        <div class="notif-row">
+          <div style="display:flex;align-items:center;gap:12px;flex:1;">
+            <div style="width:36px;height:36px;border-radius:10px;background:rgba(62,198,224,0.15);display:flex;align-items:center;justify-content:center;">
+              <i class="fa fa-chart-bar" style="color:var(--accent2);font-size:14px;"></i>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text);">Rapport hebdomadaire <span style="font-size:10px;padding:2px 6px;border-radius:20px;background:rgba(62,198,224,0.15);color:var(--accent2);margin-left:4px;">Lundi 8h</span></div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">Un résumé de tes mails, follow-ups et statistiques de la semaine</div>
+            </div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" name="notify_weekly_digest" value="1" {% if notif_prefs.notify_weekly_digest %}checked{% endif %} />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <!-- Follow-up -->
+        <div class="notif-row">
+          <div style="display:flex;align-items:center;gap:12px;flex:1;">
+            <div style="width:36px;height:36px;border-radius:10px;background:rgba(251,191,36,0.15);display:flex;align-items:center;justify-content:center;">
+              <i class="fa fa-clock-rotate-left" style="color:#fbbf24;font-size:14px;"></i>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text);">Rappels follow-up</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">Alerte quand un mail suivi n'a pas eu de réponse après X jours</div>
+            </div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" name="notify_followup" value="1" {% if notif_prefs.notify_followup %}checked{% endif %} />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <!-- Snooze wakeup -->
+        <div class="notif-row" style="border-bottom:none;">
+          <div style="display:flex;align-items:center;gap:12px;flex:1;">
+            <div style="width:36px;height:36px;border-radius:10px;background:rgba(244,114,182,0.15);display:flex;align-items:center;justify-content:center;">
+              <i class="fa fa-alarm-clock" style="color:#f472b6;font-size:14px;"></i>
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text);">Réveil de snooze</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">Notification quand un mail snoozé revient dans ta boîte</div>
+            </div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" name="notify_snooze_wakeup" value="1" {% if notif_prefs.notify_snooze_wakeup %}checked{% endif %} />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+      </div>
+
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;">
+        <div style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;">
+          <i class="fa fa-info-circle"></i>
+          Les notifications sont envoyées à <strong style="color:var(--text);">{{ current_user.email }}</strong>
+        </div>
+        <button type="submit" class="btn btn-primary" style="min-width:160px;">
+          <i class="fa fa-floppy-disk"></i> Enregistrer
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+.notif-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  gap: 16px;
+}
+/* Toggle switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.1);
+  border-radius: 24px;
+  transition: background 0.2s;
+}
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: 3px;
+  top: 3px;
+  background: rgba(255,255,255,0.5);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--primary);
+}
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(20px);
+  background: #fff;
+}
+</style>
+
+<script>
+// Soumission AJAX du formulaire notif
+document.getElementById('notif-prefs-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const form = e.target;
+  const data = {
+    notify_new_mail: form.notify_new_mail.checked ? 1 : 0,
+    notify_weekly_digest: form.notify_weekly_digest.checked ? 1 : 0,
+    notify_followup: form.notify_followup.checked ? 1 : 0,
+    notify_snooze_wakeup: form.notify_snooze_wakeup.checked ? 1 : 0,
+  };
+  const btn = form.querySelector('button[type=submit]');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Enregistrement...';
+  try {
+    const res = await fetch('/api/notifications/prefs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (res.ok) {
+      btn.innerHTML = '<i class="fa fa-check"></i> Enregistré !';
+      btn.style.background = 'rgba(74,222,128,0.2)';
+      btn.style.color = '#4ade80';
+      setTimeout(() => {
+        btn.innerHTML = '<i class="fa fa-floppy-disk"></i> Enregistrer';
+        btn.style.background = '';
+        btn.style.color = '';
+        btn.disabled = false;
+      }, 2000);
+    } else {
+      throw new Error('Erreur serveur');
+    }
+  } catch {
+    btn.innerHTML = '<i class="fa fa-xmark"></i> Erreur';
+    btn.style.background = 'rgba(255,101,132,0.2)';
+    btn.style.color = '#ff6584';
+    setTimeout(() => {
+      btn.innerHTML = '<i class="fa fa-floppy-disk"></i> Enregistrer';
+      btn.style.background = '';
+      btn.style.color = '';
+      btn.disabled = false;
+    }, 2000);
+  }
+});
+</script>
+
 {% endblock %}
