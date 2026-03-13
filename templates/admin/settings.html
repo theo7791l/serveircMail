@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">Paramètres <span>Système</span></h1>
-    <p class="page-subtitle">Toute la configuration d'Awlor, sans toucher au .env</p>
+    <p class="page-subtitle">Toute la configuration d'Awlor — sans toucher au .env</p>
   </div>
 </div>
 
@@ -162,14 +162,9 @@
           Récupère ta clé sur <a href="https://resend.com/api-keys" target="_blank" style="color:var(--primary)">resend.com/api-keys</a>
         </small>
       </div>
-      <div class="form-group">
-        <label class="form-label"><i class="fa fa-link"></i> URL Webhook Inbound</label>
-        <input class="form-input" name="webhook_url" value="{{ settings.get('webhook_url','https://awlor.online/webhook/inbound') }}" placeholder="https://awlor.online/webhook/inbound" />
-        <small class="form-hint">Configure cette URL dans Resend &rarr; Receiving &rarr; Inbound</small>
-      </div>
       <div class="info-box" style="--box-color:#f59e0b;margin-bottom:14px">
         <i class="fa fa-triangle-exclamation" style="color:#f59e0b"></i>
-        <span>Le domaine <strong>awlor.online</strong> doit être vérifié dans Resend → Domains avant de pouvoir envoyer.</span>
+        <span>Le domaine doit être vérifié dans Resend → Domains avant de pouvoir envoyer.</span>
       </div>
       <button type="button" class="btn btn-ghost" onclick="testSmtp()" id="testSmtpBtn">
         <i class="fa fa-plug"></i> Tester la connexion Resend
@@ -178,34 +173,61 @@
     </div>
   </div>
 
-  <!-- ===== Resend Inbound ===== -->
+  <!-- ===== Resend Inbound Webhook ===== -->
   <div class="card">
     <div class="settings-card-header">
       <div class="settings-icon" style="background:linear-gradient(135deg,var(--accent),#7df3ff)"><i class="fa fa-inbox"></i></div>
-      <div><div class="settings-card-title">Réception <span class="badge-inline" style="background:rgba(62,198,224,.15);color:var(--accent)">Inbound</span></div><div class="settings-card-sub">Webhook Resend pour les mails entrants</div></div>
+      <div><div class="settings-card-title">Réception <span class="badge-inline" style="background:rgba(62,198,224,.15);color:var(--accent)">Inbound Webhook</span></div><div class="settings-card-sub">Reçoit les emails entrants via Resend</div></div>
     </div>
     <div class="card-body">
-      <div class="info-box" style="--box-color:#3ec6e0">
-        <i class="fa fa-circle-info" style="color:#3ec6e0"></i>
-        <div>
-          <strong>Configuration Resend</strong><br>
-          <ol style="margin:8px 0 0 16px;padding:0;font-size:12px;line-height:1.8">
-            <li>Va sur <a href="https://resend.com/domains" target="_blank" style="color:var(--primary)">resend.com/domains</a> et vérifie <strong>awlor.online</strong></li>
-            <li>Ajoute les DNS MX, SPF, DKIM indiqués par Resend</li>
-            <li>Va dans <a href="https://resend.com/inbound" target="_blank" style="color:var(--primary)">Receiving</a> et configure l'URL webhook ci-dessus</li>
-          </ol>
+
+      <!-- URL copiable -->
+      <div class="form-group">
+        <label class="form-label"><i class="fa fa-link"></i> URL Webhook à copier dans Resend</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="form-input" id="webhookUrlDisplay" name="webhook_url"
+            value="{{ settings.get('webhook_url', request.url.scheme + '://' + request.url.netloc + '/webhook/inbound') }}"
+            placeholder="https://awlor.online/webhook/inbound" style="font-family:monospace;font-size:13px" />
+          <button type="button" onclick="copyWebhookUrl()" class="btn btn-ghost" style="white-space:nowrap;flex-shrink:0" title="Copier l'URL">
+            <i class="fa fa-copy" id="copyIcon"></i>
+          </button>
+        </div>
+        <small class="form-hint">C'est cette URL que tu colles dans Resend → Domains → ton domaine → <strong>Inbound</strong></small>
+      </div>
+
+      <!-- Guide étape par étape -->
+      <div class="info-box" style="--box-color:#3ec6e0;flex-direction:column;gap:10px">
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <i class="fa fa-circle-info" style="color:#3ec6e0;margin-top:2px;flex-shrink:0"></i>
+          <strong style="color:var(--text)">Comment configurer la réception dans Resend ?</strong>
+        </div>
+        <ol style="margin:0 0 0 18px;padding:0;font-size:12px;line-height:2;color:var(--text-muted)">
+          <li>Va sur <a href="https://resend.com/domains" target="_blank" style="color:var(--primary)">resend.com/domains</a> et clique sur ton domaine</li>
+          <li>Descends jusqu'à la section <strong>"Inbound"</strong> (ou "Receiving")</li>
+          <li>Clique sur <strong>"Add Inbound Address"</strong></li>
+          <li>Dans <strong>"Endpoint URL"</strong>, colle l'URL ci-dessus</li>
+          <li>Ajoute les enregistrements <strong>MX</strong> indiqués par Resend dans ton DNS</li>
+          <li>Copie le <strong>Signing Secret</strong> affiché et colle-le dans le champ ci-dessous</li>
+          <li>Clique sur <strong>"Verify"</strong> dans Resend</li>
+        </ol>
+        <div style="margin-top:2px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);font-size:11px;color:var(--text-dim)">
+          <i class="fa fa-lightbulb" style="color:#f59e0b"></i>
+          Les DNS MX peuvent prendre jusqu'à <strong>24–48h</strong> à se propager selon ton hébergeur DNS.
         </div>
       </div>
+
+      <!-- Signing secret -->
       <div class="form-group" style="margin-top:16px">
-        <label class="form-label"><i class="fa fa-shield-halved"></i> Clé de signature webhook <span style="color:var(--text-dim);font-weight:400">(optionnel)</span></label>
+        <label class="form-label"><i class="fa fa-shield-halved"></i> Signing Secret Resend <span style="color:var(--text-dim);font-weight:400">(recommandé)</span></label>
         <div style="position:relative;display:flex;align-items:center">
-          <input class="form-input" style="padding-right:48px" type="password" name="webhook_secret" id="webhookSecret" value="{{ settings.get('webhook_secret','') }}" placeholder="Signing secret Resend" />
+          <input class="form-input" style="padding-right:48px;font-family:monospace" type="password" name="webhook_secret" id="webhookSecret" value="{{ settings.get('webhook_secret','') }}" placeholder="whsec_xxxxxxxxxxxxxxxxxxxxxxxx" />
           <button type="button" onclick="togglePwd('webhookSecret','webhookSecretEye')" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:0">
             <i class="fa fa-eye" id="webhookSecretEye"></i>
           </button>
         </div>
-        <small class="form-hint">Si renseigné, chaque requête webhook sera vérifiée via HMAC-SHA256</small>
+        <small class="form-hint">Disponible dans Resend → Domains → ton domaine → Inbound → <strong>Signing Secret</strong>. Protège contre les faux webhooks.</small>
       </div>
+
     </div>
   </div>
 
@@ -240,6 +262,83 @@
     </div>
   </div>
 
+  <!-- ===== Intelligence Artificielle (Groq) ===== -->
+  <div class="card">
+    <div class="settings-card-header">
+      <div class="settings-icon" style="background:linear-gradient(135deg,#8b5cf6,#ec4899)"><i class="fa fa-robot"></i></div>
+      <div><div class="settings-card-title">Intelligence Artificielle <span class="badge-inline" style="background:rgba(139,92,246,.15);color:#8b5cf6">Groq</span></div><div class="settings-card-sub">Résumé, réponse automatique, détection spam</div></div>
+    </div>
+    <div class="card-body">
+      <div class="toggle-row" style="padding-top:0">
+        <div>
+          <div class="toggle-label">Activer l'IA</div>
+          <div class="toggle-sub">Afficher les fonctionnalités IA dans l'interface</div>
+        </div>
+        <label class="toggle">
+          <input type="hidden" name="ai_enabled" value="0">
+          <input type="checkbox" name="ai_enabled" value="1" {{ 'checked' if settings.get('ai_enabled','1') == '1' }}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:4px">
+        <div class="form-group">
+          <label class="form-label"><i class="fa fa-key"></i> Clé API Groq</label>
+          <div style="position:relative;display:flex;align-items:center">
+            <input class="form-input" style="padding-right:48px;font-family:monospace" type="password" name="groq_api_key" id="groqKey" value="{{ settings.get('groq_api_key','') }}" placeholder="gsk_xxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+            <button type="button" onclick="togglePwd('groqKey','groqKeyEye')" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:0">
+              <i class="fa fa-eye" id="groqKeyEye"></i>
+            </button>
+          </div>
+          <small class="form-hint">
+            Obtiens une clé gratuite sur <a href="https://console.groq.com/keys" target="_blank" style="color:var(--primary)">console.groq.com/keys</a>
+          </small>
+        </div>
+        <div class="form-group">
+          <label class="form-label"><i class="fa fa-microchip"></i> Modèle Groq</label>
+          <select class="form-input" name="groq_model">
+            {% set current_model = settings.get('groq_model','llama-3.3-70b-versatile') %}
+            <option value="llama-3.3-70b-versatile" {{ 'selected' if current_model == 'llama-3.3-70b-versatile' }}>Llama 3.3 70B Versatile (recommandé)</option>
+            <option value="llama-3.1-8b-instant" {{ 'selected' if current_model == 'llama-3.1-8b-instant' }}>Llama 3.1 8B Instant (plus rapide)</option>
+            <option value="llama3-70b-8192" {{ 'selected' if current_model == 'llama3-70b-8192' }}>Llama 3 70B (contexte 8k)</option>
+            <option value="mixtral-8x7b-32768" {{ 'selected' if current_model == 'mixtral-8x7b-32768' }}>Mixtral 8x7B (contexte 32k)</option>
+            <option value="gemma2-9b-it" {{ 'selected' if current_model == 'gemma2-9b-it' }}>Gemma 2 9B</option>
+          </select>
+          <small class="form-hint">Tous ces modèles sont gratuits sur Groq. Le 70B est plus précis, le 8B plus rapide.</small>
+        </div>
+      </div>
+      <div class="info-box" style="--box-color:#8b5cf6">
+        <i class="fa fa-circle-info" style="color:#8b5cf6"></i>
+        <span>Groq propose un tier gratuit généreux. Aucune carte bancaire requise pour commencer.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Notifications & Digest ===== -->
+  <div class="card">
+    <div class="settings-card-header">
+      <div class="settings-icon" style="background:linear-gradient(135deg,#22d3ee,#3b82f6)"><i class="fa fa-bell"></i></div>
+      <div><div class="settings-card-title">Notifications &amp; Digest</div><div class="settings-card-sub">Alertes email et résumé hebdomadaire</div></div>
+    </div>
+    <div class="card-body">
+      <div class="toggle-row" style="padding-top:0">
+        <div>
+          <div class="toggle-label">Digest hebdomadaire</div>
+          <div class="toggle-sub">Envoyer un résumé chaque lundi matin</div>
+        </div>
+        <label class="toggle">
+          <input type="hidden" name="weekly_digest_enabled" value="0">
+          <input type="checkbox" name="weekly_digest_enabled" value="1" {{ 'checked' if settings.get('weekly_digest_enabled','0') == '1' }}>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="form-group" style="padding-top:14px;border-top:1px solid var(--border)">
+        <label class="form-label">Heure d'envoi du digest</label>
+        <input class="form-input" type="time" name="digest_send_time" value="{{ settings.get('digest_send_time','08:00') }}" style="width:120px" />
+        <small class="form-hint">Heure UTC</small>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <div style="display:flex;justify-content:flex-end;margin-top:24px">
@@ -268,6 +367,16 @@ function togglePwd(inputId, eyeId){
   e.className=i.type==='password'?'fa fa-eye':'fa fa-eye-slash';
 }
 
+function copyWebhookUrl(){
+  const val = document.getElementById('webhookUrlDisplay').value;
+  navigator.clipboard.writeText(val).then(()=>{
+    const icon = document.getElementById('copyIcon');
+    icon.className = 'fa fa-check';
+    icon.style.color = 'var(--accent3)';
+    setTimeout(()=>{ icon.className='fa fa-copy'; icon.style.color=''; }, 2000);
+  });
+}
+
 async function testSmtp(){
   const btn=document.getElementById('testSmtpBtn');
   const res=document.getElementById('testSmtpResult');
@@ -283,7 +392,7 @@ async function testSmtp(){
       res.innerHTML='<i class="fa fa-check-circle"></i> '+d.message;
     }else{
       res.style.cssText='display:block;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--accent2);margin-top:12px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm)';
-      res.innerHTML='<i class="fa fa-circle-xmark"></i> Erreur : '+(d.error||'Connexion impossible');
+      res.innerHTML='<i class="fa fa-circle-xmark"></i> Erreur : '+(d.error||d.message||'Connexion impossible');
     }
   }catch(e){
     res.style.display='block';
