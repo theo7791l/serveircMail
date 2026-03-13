@@ -1,117 +1,165 @@
-"""Background scheduler for snooze, scheduled send, follow-up tracking, mail expiry."""
-import threading
+"""
+Scheduler Awlor — Tâches d'arrière-plan
+Lancer en parallèle avec uvicorn via start.sh ou via threading au démarrage de main.py
+
+Tâches actives:
+  - Envoi des mails programmés (scheduled_mails)
+  - Réveil des mails snoozeés
+  - Nettoyage des sessions expirées
+  - Nettoyage des mails expirés (expires_at)
+  - Nettoyage des pending_users expirés
+"""
+
 import time
+import threading
 import logging
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='[SCHEDULER] %(asctime)s %(message)s')
+log = logging.getLogger('scheduler')
 
 
-def run_scheduler(db_module, email_client_module):
-    """Run periodic background tasks every 60 seconds."""
+def _run_scheduled_mails():
+    """Envoie les mails programmés dont send_at <= maintenant."""
+    try:
+        import database as db
+        import email_client
+        import json
+
+        pending = db.get_pending_scheduled_mails()
+        for mail in pending:
+            try:
+                to_lower = mail['mail_to'].lower()
+                is_internal = db.address_exists(to_lower)
+                body_html = mail['body_html'] or ''
+                body_text = mail['body_text'] or ''
+                subject = mail['subject'] or ''
+                sent_from = mail['mail_from']
+
+                if is_internal:
+                    db.save_inbound_mail(
+                        mail_to=to_lower, mail_from=sent_from,
+                        subject=subject, body_html=body_html,
+                        body_text=body_text, folder='INBOX'
+                    )
+                    ok = True
+                else:
+                    is_html = bool(body_html)
+                    ok, _ = email_client.send_mail(
+                        user=None, to=mail['mail_to'], subject=subject,
+                        body=body_html if is_html else body_text,
+                        html=is_html, from_address=sent_from
+                    )
+
+                if ok:
+                    db.save_inbound_mail(
+                        mail_to=to_lower, mail_from=sent_from,
+                        subject=subject, body_html=body_html,
+                        body_text=body_text,
+                        headers=json.dumps({'from': sent_from, 'to': mail['mail_to']}),
+                        folder='Sent'
+                    )
+                    db.mark_scheduled_sent(mail['id'])
+                    log.info(f"Mail programmé #{mail['id']} envoyé à {mail['mail_to']}")
+                else:
+                    log.warning(f"Echec envoi mail programmé #{mail['id']}")
+            except Exception as e:
+                log.error(f"Erreur mail programmé #{mail.get('id', '?')}: {e}")
+    except Exception as e:
+        log.error(f"_run_scheduled_mails: {e}")
+
+
+def _run_snooze_wakeup():
+    """Remet en INBOX les mails dont le snooze est échu."""
+    try:
+        import database as db
+        count = db.process_snooze_wakeups()
+        if count:
+            log.info(f"{count} mail(s) snoozeé(s) réveillé(s)")
+    except Exception as e:
+        log.error(f"_run_snooze_wakeup: {e}")
+
+
+def _cleanup_sessions():
+    """Supprime les sessions expirées."""
+    try:
+        import database as db
+        conn = db.get_conn()
+        result = conn.execute("DELETE FROM sessions WHERE expires_at < datetime('now')")
+        conn.commit()
+        deleted = result.rowcount
+        conn.close()
+        if deleted:
+            log.info(f"{deleted} session(s) expirée(s) supprimée(s)")
+    except Exception as e:
+        log.error(f"_cleanup_sessions: {e}")
+
+
+def _cleanup_expired_mails():
+    """Supprime les mails avec expires_at dépassé."""
+    try:
+        import database as db
+        conn = db.get_conn()
+        result = conn.execute(
+            "DELETE FROM inbound_mails WHERE expires_at IS NOT NULL AND expires_at < datetime('now')"
+        )
+        conn.commit()
+        deleted = result.rowcount
+        conn.close()
+        if deleted:
+            log.info(f"{deleted} mail(s) expiré(s) supprimé(s)")
+    except Exception as e:
+        log.error(f"_cleanup_expired_mails: {e}")
+
+
+def _cleanup_pending_users():
+    """Supprime les inscriptions en attente expirées."""
+    try:
+        import database as db
+        conn = db.get_conn()
+        result = conn.execute("DELETE FROM pending_users WHERE expires_at < datetime('now')")
+        conn.commit()
+        deleted = result.rowcount
+        conn.close()
+        if deleted:
+            log.info(f"{deleted} inscription(s) en attente expirée(s) supprimée(s)")
+    except Exception as e:
+        log.error(f"_cleanup_pending_users: {e}")
+
+
+TASKS = [
+    # (fonction, intervalle_secondes, label)
+    (_run_scheduled_mails,  60,   'scheduled_mails'),
+    (_run_snooze_wakeup,    30,   'snooze_wakeup'),
+    (_cleanup_sessions,    900,   'cleanup_sessions'),
+    (_cleanup_expired_mails, 300, 'cleanup_expired_mails'),
+    (_cleanup_pending_users, 600, 'cleanup_pending_users'),
+]
+
+
+def _task_loop(fn, interval, label):
     while True:
         try:
-            _process_scheduled_mails(db_module, email_client_module)
-            _process_snoozed_mails(db_module)
-            _process_expired_mails(db_module)
-            _process_followup_tracker(db_module)
+            fn()
         except Exception as e:
-            logger.error(f"Scheduler error: {e}")
-        time.sleep(60)
+            log.error(f"[{label}] Exception non capturée: {e}")
+        time.sleep(interval)
 
 
-def _process_scheduled_mails(db, email_client):
-    """Send mails scheduled for now or past."""
+def start_scheduler():
+    """Lance toutes les tâches en daemon threads."""
+    for fn, interval, label in TASKS:
+        t = threading.Thread(target=_task_loop, args=(fn, interval, label), daemon=True, name=f'sched-{label}')
+        t.start()
+        log.info(f"Tâche '{label}' démarrée (intervalle: {interval}s)")
+
+
+if __name__ == '__main__':
+    log.info('Scheduler Awlor démarré en mode standalone')
+    start_scheduler()
+    # Boucle principale pour garder le processus vivant
     try:
-        conn = db.get_conn()
-        now = datetime.utcnow().isoformat()
-        rows = conn.execute(
-            "SELECT * FROM scheduled_mails WHERE send_at <= ? AND sent=0", (now,)
-        ).fetchall()
-        for row in rows:
-            r = dict(row)
-            try:
-                ok, err = email_client.send_mail(
-                    user=None,
-                    to=r["mail_to"],
-                    subject=r["subject"],
-                    body=r["body"],
-                    from_address=r["mail_from"]
-                )
-                conn.execute("UPDATE scheduled_mails SET sent=1 WHERE id=?", (r["id"],))
-                conn.commit()
-                logger.info(f"Scheduled mail {r['id']} sent to {r['mail_to']}")
-            except Exception as e:
-                logger.error(f"Failed to send scheduled mail {r['id']}: {e}")
-        conn.close()
-    except Exception as e:
-        logger.error(f"_process_scheduled_mails error: {e}")
-
-
-def _process_snoozed_mails(db):
-    """Restore snoozed mails whose time has come."""
-    try:
-        conn = db.get_conn()
-        now = datetime.utcnow().isoformat()
-        rows = conn.execute(
-            "SELECT * FROM mail_snooze WHERE wake_at <= ? AND woken=0", (now,)
-        ).fetchall()
-        for row in rows:
-            r = dict(row)
-            conn.execute(
-                "UPDATE inbound_mails SET folder='INBOX', seen=0 WHERE id=?",
-                (r["mail_id"],)
-            )
-            conn.execute("UPDATE mail_snooze SET woken=1 WHERE id=?", (r["id"],))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"_process_snoozed_mails error: {e}")
-
-
-def _process_expired_mails(db):
-    """Delete mails past their expiry date."""
-    try:
-        conn = db.get_conn()
-        now = datetime.utcnow().isoformat()
-        conn.execute(
-            "DELETE FROM inbound_mails WHERE expires_at IS NOT NULL AND expires_at <= ?",
-            (now,)
-        )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"_process_expired_mails error: {e}")
-
-
-def _process_followup_tracker(db):
-    """Mark follow-up needed if no reply after threshold."""
-    try:
-        conn = db.get_conn()
-        now = datetime.utcnow().isoformat()
-        conn.execute(
-            """
-            UPDATE inbound_mails SET followup_needed=1
-            WHERE folder='Sent'
-            AND followup_days > 0
-            AND followup_needed=0
-            AND datetime(created_at, '+' || followup_days || ' days') <= ?
-            """,
-            (now,)
-        )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"_process_followup_tracker error: {e}")
-
-
-def start_scheduler(db_module, email_client_module):
-    """Start the scheduler in a daemon thread."""
-    t = threading.Thread(
-        target=run_scheduler,
-        args=(db_module, email_client_module),
-        daemon=True
-    )
-    t.start()
-    logger.info("Background scheduler started.")
-    return t
+        while True:
+            time.sleep(60)
+    except KeyboardInterrupt:
+        log.info('Scheduler arrêté')
