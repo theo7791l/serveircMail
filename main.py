@@ -13,7 +13,7 @@ from config import settings
 
 db.init_db()
 
-app = FastAPI(title="serveircMail", docs_url=None, redoc_url=None)
+app = FastAPI(title="Awlor", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
@@ -21,7 +21,7 @@ def render(template, request, ctx={}):
     session = request.cookies.get("session")
     user = db.get_session_user(session)
     perms = db.get_user_permissions(user["id"]) if user else []
-    site_name = db.get_setting("site_name", "serveircMail")
+    site_name = db.get_setting("site_name", "Awlor")
     maintenance = db.get_setting("maintenance_mode", "0")
     base = {"request": request, "current_user": user, "user_perms": perms,
             "site_name": site_name, "maintenance_mode": maintenance}
@@ -89,7 +89,6 @@ async def register(request: Request,
     if not mail_domain:
         return RedirectResponse("/register?error=no_domain", status_code=302)
 
-    # Validation du préfixe
     prefix = mail_prefix.strip().lower()
     import re
     if not re.match(r'^[a-z0-9._+-]+$', prefix):
@@ -107,15 +106,22 @@ async def register(request: Request,
     ip = auth.get_client_ip(request)
     code = db.create_pending_user(username, display_name, email, password, mail_alias)
 
-    sender = {"id": None, "email": f"noreply@{mail_domain}"}
+    site_name = db.get_setting("site_name", "Awlor")
+    # Pas de user réel ici, on passe None — l'adresse expéditrice sera noreply@mail_domain
     body = (
         f"Bonjour {display_name},\n\n"
-        f"Votre code de vérification pour activer votre compte serveircMail est :\n\n"
+        f"Votre code de vérification pour activer votre compte {site_name} est :\n\n"
         f"    {code}\n\n"
-        f"Ce code expire dans 15 minutes."
+        f"Ce code expire dans 15 minutes.\n\n"
+        f"L'équipe {site_name}"
     )
-    email_client.send_mail(sender, to=email, subject="[serveircMail] Code de vérification",
-                           body=body, from_address=f"noreply@{mail_domain}")
+    email_client.send_mail(
+        user=None,
+        to=email,
+        subject=f"[{site_name}] Code de vérification",
+        body=body,
+        from_address=f"noreply@{mail_domain}"
+    )
     db.add_audit_log(None, username, "REGISTER_PENDING", ip=ip, details=f"alias={mail_alias}")
     return render("verify.html", request, {"email": email, "error": ""})
 
@@ -235,7 +241,6 @@ async def admin_users(request: Request, user=Depends(auth.require_perm("can_mana
     users, total = db.get_all_users(search=search, page=page)
     roles = db.get_all_roles()
     pages = max(1, -(-total // 20))
-    # Enrichit chaque user avec ses adresses
     for u in users:
         u["addresses"] = db.get_user_addresses(u["id"])
     mail_domain = db.get_setting("mail_domain", "")
@@ -378,7 +383,6 @@ async def api_folders(user=Depends(auth.require_auth)):
 @app.get("/api/mails")
 async def api_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20,
     address: str = "", user=Depends(auth.require_auth)):
-    # Vérifie que l'adresse filtrée appartient bien au user
     if address:
         user_addrs = db.get_all_addresses_for_user(user["id"])
         if address.lower() not in [a.lower() for a in user_addrs]:
@@ -391,7 +395,6 @@ async def api_mail(uid: int, user=Depends(auth.require_auth)):
     mail = email_client.get_mail(user, uid=str(uid))
     if "error" in mail:
         raise HTTPException(404, detail=mail["error"])
-    # Vérifie que le mail est destiné à une adresse du user
     user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
     if mail.get("to", "").lower() not in user_addrs:
         raise HTTPException(403, detail="Accès refusé")
@@ -402,17 +405,30 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
     if not db.user_has_perm(user["id"], "can_send_mail"):
         raise HTTPException(403)
     data = await request.json()
-    from_address = data.get("from_address", "")
-    # Vérifie que l'adresse expéditrice appartient au user
+    to = (data.get("to") or "").strip()
+    subject = (data.get("subject") or "").strip()
+    body = (data.get("body") or "").strip()
+    from_address = (data.get("from_address") or "").strip()
+
+    if not to:
+        return JSONResponse({"success": False, "error": "Destinataire manquant"})
+
+    # Vérifie que l'adresse expéditrice fournie appartient bien au user
     if from_address:
         user_addrs = db.get_all_addresses_for_user(user["id"])
         if from_address.lower() not in [a.lower() for a in user_addrs]:
             raise HTTPException(403, detail="Adresse expéditrice non autorisée")
-    ok, err = email_client.send_mail(user, to=data.get("to"), subject=data.get("subject"),
-                                     body=data.get("body"), html=data.get("html", False),
-                                     from_address=from_address or None)
+
+    ok, err = email_client.send_mail(
+        user=user,
+        to=to,
+        subject=subject,
+        body=body,
+        html=data.get("html", False),
+        from_address=from_address or None
+    )
     if ok:
-        db.add_audit_log(user["id"], user["username"], "SEND_MAIL", target=data.get("to"))
+        db.add_audit_log(user["id"], user["username"], "SEND_MAIL", target=to)
     return {"success": ok, "error": err}
 
 @app.post("/api/mail/{uid}/delete")
@@ -427,7 +443,7 @@ async def api_my_addresses(user=Depends(auth.require_auth)):
     return {"addresses": db.get_user_addresses(user["id"])}
 
 # ============================================================
-# API MODÉRATION (accès global mails)
+# API MODÉRATION
 # ============================================================
 
 @app.get("/api/moderation/mails")
@@ -452,7 +468,7 @@ async def api_moderation_delete(uid: int, user=Depends(auth.require_perm("can_vi
     return {"success": ok}
 
 # ============================================================
-# API ADMIN — adresses
+# API ADMIN
 # ============================================================
 
 @app.get("/api/admin/users/{uid}/addresses")
@@ -479,7 +495,8 @@ async def api_admin_stats(user=Depends(auth.require_perm("can_view_stats"))):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "app": "serveircMail"}
+    return {"status": "ok", "app": "Awlor"}
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 15431)), reload=False)
+    port = int(db.get_setting("app_port") or os.getenv("PORT", 15431))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)

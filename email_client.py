@@ -1,7 +1,6 @@
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.headerregistry import Address
 from email.utils import formataddr
 import os
 
@@ -13,20 +12,44 @@ def _get_smtp_config() -> dict:
         'smtp_port': 587,
         'smtp_user': 'resend',
         'smtp_pass': get_setting('global_smtp_password') or os.getenv('SMTP_PASSWORD', ''),
-        'mail_domain': get_setting('mail_domain') or os.getenv('MAIL_DOMAIN', ''),
+        'mail_domain': get_setting('mail_domain') or os.getenv('MAIL_DOMAIN', 'awlor.online'),
     }
 
 
 def _format_from(display_name: str, address: str) -> str:
     """
-    Retourne une chaîne "Prénom Nom <email@domaine.com>" correctement encodée.
-    Resend exige ce format strict pour le champ From.
+    Retourne "Prénom Nom <email@domaine.com>" accepté par Resend.
+    Si pas de display_name, retourne juste l'adresse.
     """
+    address = (address or '').strip().lower()
     if not address:
         return ''
+    display_name = (display_name or '').strip()
     if display_name:
-        return formataddr((display_name.strip(), address.strip().lower()))
-    return address.strip().lower()
+        return formataddr((display_name, address))
+    return address
+
+
+def _resolve_from_address(user: dict, from_address: str = None) -> str:
+    """
+    Résout l'adresse expéditrice dans l'ordre :
+    1. from_address fourni explicitement
+    2. adresse primaire du user (si user a un id)
+    3. fallback noreply@<mail_domain>
+    """
+    if from_address and from_address.strip():
+        return from_address.strip().lower()
+
+    if user and user.get('id'):
+        from database import get_primary_address
+        addr = get_primary_address(user['id'])
+        if addr and addr.strip():
+            return addr.strip().lower()
+
+    # Fallback ultime
+    from database import get_setting
+    domain = get_setting('mail_domain') or os.getenv('MAIL_DOMAIN', 'awlor.online')
+    return f'noreply@{domain}'
 
 
 def get_folders(user: dict):
@@ -51,25 +74,14 @@ def get_mail(user: dict, uid: str, folder: str = 'INBOX'):
 
 def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False, from_address: str = None):
     """
-    Envoi via Resend SMTP (smtp.resend.com:587 STARTTLS).
-    'from_address' permet de choisir quelle adresse utiliser comme expéditeur.
-    Si non fourni, utilise l'adresse primaire du user.
-    Le champ From est toujours formaté "Display Name <email@domaine>" pour Resend.
+    Envoi via Resend SMTP.
+    L'adresse expéditrice est toujours résolue (jamais vide).
     """
     cfg = _get_smtp_config()
 
-    if from_address:
-        raw_addr = from_address.strip().lower()
-    else:
-        from database import get_primary_address
-        raw_addr = get_primary_address(user['id']) if user.get('id') else user.get('email', '')
-
-    # Formatage strict : "Prénom Nom <email@domaine.com>"
-    display_name = user.get('display_name', '') if user else ''
+    raw_addr = _resolve_from_address(user, from_address)
+    display_name = (user or {}).get('display_name', '') or ''
     from_header = _format_from(display_name, raw_addr)
-
-    if not from_header:
-        return False, "Adresse expéditeur manquante"
 
     try:
         msg = MIMEMultipart('alternative')
@@ -77,7 +89,6 @@ def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False, 
         msg['From'] = from_header
         msg['To'] = to.strip()
         msg['Reply-To'] = from_header
-
         msg.attach(MIMEText(body, 'html' if html else 'plain', 'utf-8'))
 
         server = smtplib.SMTP(cfg['smtp_host'], cfg['smtp_port'], timeout=15)
@@ -85,7 +96,7 @@ def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False, 
         server.starttls()
         server.ehlo()
         server.login(cfg['smtp_user'], cfg['smtp_pass'])
-        # sendmail prend l'adresse brute (sans display name) pour l'enveloppe SMTP
+        # sendmail : adresse brute sans display name pour l'enveloppe SMTP
         server.sendmail(raw_addr, to.strip(), msg.as_string())
         server.quit()
         return True, None
