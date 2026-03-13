@@ -3,58 +3,66 @@
 <div class="auth-page">
   <div class="auth-card" style="max-width:480px">
     <div class="auth-logo">
-      <div class="auth-logo-icon"><i class="fa fa-user-plus"></i></div>
-      <h1 class="auth-title">Créer un compte</h1>
-      <p class="auth-subtitle">Rejoignez {{ site_name }}</p>
+      <div class="auth-logo-icon"><i class="fa fa-envelope-open-text"></i></div>
+      <h1 class="auth-title">{{ site_name }}</h1>
+      <p class="auth-subtitle">Créez votre compte messagerie</p>
     </div>
 
     {% if error == 'username_taken' %}<div class="auth-error"><i class="fa fa-circle-xmark"></i> Nom d'utilisateur déjà utilisé</div>{% endif %}
     {% if error == 'email_taken' %}<div class="auth-error"><i class="fa fa-circle-xmark"></i> Email déjà utilisé</div>{% endif %}
-    {% if error == 'alias_taken' %}<div class="auth-error"><i class="fa fa-circle-xmark"></i> Cette adresse mail est déjà prise</div>{% endif %}
-    {% if error == 'invalid_prefix' %}<div class="auth-error"><i class="fa fa-circle-xmark"></i> Adresse invalide (lettres, chiffres, . _ + - uniquement)</div>{% endif %}
+    {% if error == 'alias_taken' %}<div class="auth-error"><i class="fa fa-circle-xmark"></i> Cette adresse mail est déjà prise, choisissez-en une autre</div>{% endif %}
+    {% if error == 'invalid_prefix' %}<div class="auth-error"><i class="fa fa-circle-xmark"></i> Adresse invalide — lettres, chiffres, . _ + - uniquement</div>{% endif %}
     {% if error == 'no_domain' %}<div class="auth-error"><i class="fa fa-circle-xmark"></i> Aucun domaine configuré, contactez un administrateur</div>{% endif %}
     {% if error == 'registration_closed' %}<div class="auth-error" style="background:rgba(62,198,224,0.1);border-color:rgba(62,198,224,0.3);color:#3EC6E0;"><i class="fa fa-lock"></i> Les inscriptions sont fermées</div>{% endif %}
 
-    <form method="post" action="/register" autocomplete="off">
+    <form method="post" action="/register" autocomplete="off" id="registerForm">
       <div class="grid-2">
         <div class="form-group">
           <label class="form-label"><i class="fa fa-user"></i> Nom d'utilisateur</label>
-          <input class="form-input" type="text" name="username" placeholder="monpseudo" required autocomplete="username" />
+          <input class="form-input" type="text" name="username" id="usernameInput" placeholder="monpseudo" required autocomplete="username" />
         </div>
         <div class="form-group">
           <label class="form-label"><i class="fa fa-id-card"></i> Nom affiché</label>
-          <input class="form-input" type="text" name="display_name" placeholder="Mon Nom" required />
+          <input class="form-input" type="text" name="display_name" id="displayNameInput" placeholder="Mon Nom" required />
         </div>
       </div>
 
       <div class="form-group">
         <label class="form-label"><i class="fa fa-envelope"></i> Email de récupération</label>
         <input class="form-input" type="email" name="email" placeholder="votre@email-perso.com" required autocomplete="email" />
-        <small style="color:var(--text-dim);font-size:11px">Utilisé uniquement pour la vérification du compte — pas votre adresse serveircMail</small>
+        <small style="color:var(--text-dim);font-size:11px">Utilisé uniquement pour la vérification — pas votre adresse Awlor</small>
       </div>
 
       <div class="form-group">
-        <label class="form-label"><i class="fa fa-at"></i> Votre adresse mail serveircMail</label>
-        <div style="display:flex;align-items:center;gap:0">
+        <label class="form-label"><i class="fa fa-at"></i> Votre adresse mail Awlor</label>
+        {% if mail_domain %}
+        <div style="display:flex;align-items:center">
           <input class="form-input" type="text" name="mail_prefix"
+            id="mailPrefixInput"
             placeholder="prenom.nom"
             required
             pattern="[a-zA-Z0-9._+\-]+"
-            style="border-radius:8px 0 0 8px;flex:1"
-            id="mailPrefixInput" />
-          {% if mail_domain %}
-          <span style="background:var(--bg-hover);border:1px solid var(--border);border-left:none;padding:0 14px;height:42px;display:flex;align-items:center;border-radius:0 8px 8px 0;color:var(--text-dim);font-size:14px;white-space:nowrap">@{{ mail_domain }}</span>
-          {% endif %}
+            style="border-radius:8px 0 0 8px;flex:1;min-width:0" />
+          <span style="background:var(--bg-hover);border:1px solid var(--border);border-left:none;padding:0 14px;height:42px;display:flex;align-items:center;border-radius:0 8px 8px 0;color:var(--text-dim);font-size:13px;white-space:nowrap;flex-shrink:0">@{{ mail_domain }}</span>
         </div>
-        <small id="mailPreview" style="color:var(--primary);font-size:12px;margin-top:4px;display:block"></small>
+        <small id="mailPreview" style="color:var(--primary);font-size:12px;margin-top:4px;display:block;min-height:16px"></small>
+        {% else %}
+        <input class="form-input" type="text" name="mail_prefix" placeholder="prenom.nom" required />
+        <small style="color:#ff6b6b;font-size:11px">⚠ Aucun domaine configuré</small>
+        {% endif %}
       </div>
 
       <div class="form-group">
         <label class="form-label"><i class="fa fa-lock"></i> Mot de passe</label>
-        <input class="form-input" type="password" name="password" placeholder="••••••••" required autocomplete="new-password" minlength="8" />
+        <div style="position:relative;display:flex;align-items:center">
+          <input class="form-input" type="password" name="password" id="pwdInput" placeholder="••••••••" required autocomplete="new-password" minlength="8" style="padding-right:48px" />
+          <button type="button" onclick="togglePwd()" style="position:absolute;right:14px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:0">
+            <i class="fa fa-eye" id="eyeIcon"></i>
+          </button>
+        </div>
       </div>
 
-      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px;">
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px">
         <i class="fa fa-user-plus"></i> Créer mon compte
       </button>
     </form>
@@ -64,15 +72,57 @@
     </div>
   </div>
 </div>
+
 <script>
-const input = document.getElementById('mailPrefixInput');
-const preview = document.getElementById('mailPreview');
 const domain = '{{ mail_domain }}';
-if(input && domain){
-  input.addEventListener('input', () => {
-    const v = input.value.trim().toLowerCase();
-    preview.textContent = v ? 'Votre adresse sera : ' + v + '@' + domain : '';
+const prefixInput = document.getElementById('mailPrefixInput');
+const preview = document.getElementById('mailPreview');
+const displayNameInput = document.getElementById('displayNameInput');
+const usernameInput = document.getElementById('usernameInput');
+
+// Génère un préfixe suggéré à partir du nom affiché
+function slugify(str) {
+  return str.toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '.')
+    .replace(/^\.+|\.+$/g, '');
+}
+
+// Met à jour la suggestion si le préfixe n'a pas encore été modifié manuellement
+let prefixTouched = false;
+if(prefixInput) {
+  prefixInput.addEventListener('input', () => {
+    prefixTouched = true;
+    updatePreview();
   });
+}
+
+if(displayNameInput) {
+  displayNameInput.addEventListener('input', () => {
+    if(!prefixTouched && prefixInput) {
+      const slug = slugify(displayNameInput.value);
+      prefixInput.value = slug;
+      updatePreview();
+    }
+  });
+}
+
+function updatePreview() {
+  if(!prefixInput || !preview || !domain) return;
+  const v = prefixInput.value.trim().toLowerCase();
+  if(v) {
+    preview.textContent = '✓ Votre adresse : ' + v + '@' + domain;
+    preview.style.color = 'var(--primary)';
+  } else {
+    preview.textContent = '';
+  }
+}
+
+function togglePwd(){
+  const i = document.getElementById('pwdInput');
+  const e = document.getElementById('eyeIcon');
+  i.type = i.type === 'password' ? 'text' : 'password';
+  e.className = i.type === 'password' ? 'fa fa-eye' : 'fa fa-eye-slash';
 }
 </script>
 {% endblock %}

@@ -4,7 +4,7 @@ import secrets
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 
-DB_PATH = os.getenv("DB_PATH", "/home/container/serveircmail.db")
+DB_PATH = os.getenv("DB_PATH", "/home/container/awlor.db")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 DEFAULT_PERMISSIONS = [
@@ -80,7 +80,6 @@ def init_db():
         created_at TEXT DEFAULT (datetime('now'))
     )""")
 
-    # Table des adresses mail (1 user peut en avoir plusieurs)
     c.execute("""CREATE TABLE IF NOT EXISTS mail_addresses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -177,7 +176,7 @@ def init_db():
     defaults = [
         ("allow_registration", "1"),
         ("maintenance_mode", "0"),
-        ("site_name", "serveircMail"),
+        ("site_name", "Awlor"),
         ("max_users", "100"),
         ("global_smtp_password", os.getenv("SMTP_PASSWORD", "")),
         ("mail_domain", os.getenv("MAIL_DOMAIN", "")),
@@ -192,7 +191,7 @@ def init_db():
 def _create_super_admin():
     sa_user = os.getenv("SUPER_ADMIN_USERNAME", "admin")
     sa_pass = os.getenv("SUPER_ADMIN_PASSWORD", "admin1234")
-    sa_email = os.getenv("SUPER_ADMIN_EMAIL", "admin@serveircmail.local")
+    sa_email = os.getenv("SUPER_ADMIN_EMAIL", "admin@awlor.local")
     conn = get_conn()
     c = conn.cursor()
     exists = c.execute("SELECT id FROM users WHERE username=?", (sa_user,)).fetchone()
@@ -300,7 +299,6 @@ def get_primary_address(user_id: int):
     return row["address"] if row else ""
 
 def get_all_addresses_for_user(user_id: int):
-    """Retourne la liste des adresses mail sous forme de strings."""
     rows = get_user_addresses(user_id)
     return [r["address"] for r in rows]
 
@@ -322,7 +320,6 @@ def get_user_by_address(address: str):
 def add_mail_address(user_id: int, address: str, label: str = "", is_primary: bool = False) -> tuple:
     conn = get_conn()
     try:
-        # Si c'est la première adresse du user, la mettre en primaire automatiquement
         count = conn.execute("SELECT COUNT(*) FROM mail_addresses WHERE user_id=?", (user_id,)).fetchone()[0]
         primary = 1 if (is_primary or count == 0) else 0
         if primary:
@@ -339,7 +336,6 @@ def add_mail_address(user_id: int, address: str, label: str = "", is_primary: bo
         return False, "Cette adresse est déjà utilisée"
 
 def remove_mail_address(address_id: int, user_id: int = None) -> bool:
-    """Supprime une adresse. Si user_id fourni, vérifie que l'adresse appartient bien à cet user."""
     conn = get_conn()
     if user_id:
         result = conn.execute("DELETE FROM mail_addresses WHERE id=? AND user_id=?", (address_id, user_id))
@@ -404,7 +400,6 @@ def confirm_pending_user(email: str, code: str):
     conn = get_conn()
     conn.execute("UPDATE users SET password_hash=? WHERE email=?", (pending["password_hash"], pending["email"]))
     conn.commit()
-    # Créer l'adresse mail primaire
     user = dict(conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone())
     conn.close()
     add_mail_address(user["id"], pending["mail_alias"], label="Principal", is_primary=True)
@@ -543,7 +538,7 @@ def get_all_settings():
     conn.close()
     return {r["key"]: r["value"] for r in rows}
 
-# ========== INBOUND MAILS (Resend webhook) ==========
+# ========== INBOUND MAILS ==========
 
 def save_inbound_mail(mail_to: str, mail_from: str, subject: str, body_html: str, body_text: str, headers: str = "", folder: str = "INBOX"):
     conn = get_conn()
@@ -555,7 +550,6 @@ def save_inbound_mail(mail_to: str, mail_from: str, subject: str, body_html: str
     conn.close()
 
 def get_inbound_mails(mail_to: str, folder: str = "INBOX", page: int = 1, per_page: int = 20):
-    """Récupère les mails d'une adresse précise."""
     conn = get_conn()
     offset = (page - 1) * per_page
     total = conn.execute(
@@ -573,7 +567,6 @@ def get_inbound_mails(mail_to: str, folder: str = "INBOX", page: int = 1, per_pa
     return {'mails': mails, 'total': total, 'page': page, 'pages': pages}
 
 def get_inbound_mails_multi(addresses: list, folder: str = "INBOX", page: int = 1, per_page: int = 20):
-    """Récupère les mails de plusieurs adresses (pour les users avec plusieurs adresses)."""
     if not addresses:
         return {'mails': [], 'total': 0, 'page': 1, 'pages': 1}
     conn = get_conn()
@@ -595,7 +588,6 @@ def get_inbound_mails_multi(addresses: list, folder: str = "INBOX", page: int = 
     return {'mails': mails, 'total': total, 'page': page, 'pages': pages}
 
 def get_all_inbound_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20):
-    """Toutes les adresses — réservé modération."""
     conn = get_conn()
     offset = (page - 1) * per_page
     total = conn.execute("SELECT COUNT(*) FROM inbound_mails WHERE folder=?", (folder,)).fetchone()[0]
