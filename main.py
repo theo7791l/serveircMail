@@ -437,26 +437,46 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
         if from_address.lower() not in [a.lower() for a in user_addrs]:
             raise HTTPException(403, detail="Adresse exp\u00e9ditrice non autoris\u00e9e")
 
-    ok, err = email_client.send_mail(
-        user=user,
-        to=to,
-        subject=subject,
-        body=body,
-        html=is_html,
-        from_address=from_address or None
-    )
+    sent_from = from_address or db.get_primary_address(user["id"]) or f"noreply@{db.get_setting('mail_domain', 'awlor.online')}"
+    body_html = body if is_html else ""
+    body_text = "" if is_html else body
 
-    if ok:
-        sent_from = from_address or db.get_primary_address(user["id"]) or f"noreply@{db.get_setting('mail_domain', 'awlor.online')}"
-        body_html = body if is_html else ""
-        body_text = "" if is_html else body
+    # --- Livraison interne : si le destinataire est une adresse locale, on bypass Resend ---
+    to_lower = to.lower()
+    is_internal = db.address_exists(to_lower)
+
+    if is_internal:
+        # Déposer directement dans l'INBOX du destinataire
         db.save_inbound_mail(
-            mail_to=sent_from,
+            mail_to=to_lower,
             mail_from=sent_from,
             subject=subject,
             body_html=body_html,
             body_text=body_text,
-            headers=json.dumps({"to": to}),
+            headers=json.dumps({"from": sent_from, "to": to}),
+            folder="INBOX"
+        )
+        ok, err = True, None
+    else:
+        # Envoi externe via Resend SMTP
+        ok, err = email_client.send_mail(
+            user=user,
+            to=to,
+            subject=subject,
+            body=body,
+            html=is_html,
+            from_address=sent_from
+        )
+
+    if ok:
+        # Sauvegarder dans Sent avec mail_to = vrai destinataire
+        db.save_inbound_mail(
+            mail_to=to_lower,
+            mail_from=sent_from,
+            subject=subject,
+            body_html=body_html,
+            body_text=body_text,
+            headers=json.dumps({"from": sent_from, "to": to}),
             folder="Sent"
         )
         db.add_audit_log(user["id"], user["username"], "SEND_MAIL", target=to)
@@ -476,11 +496,9 @@ async def api_my_addresses(user=Depends(auth.require_auth)):
 
 @app.get("/api/stats")
 async def api_stats(user=Depends(auth.require_auth)):
-    from database import get_inbound_mails_multi, get_all_addresses_for_user
-    addresses = get_all_addresses_for_user(user["id"])
+    addresses = db.get_all_addresses_for_user(user["id"])
     unread = 0
     if addresses:
-        import sqlite3
         conn = db.get_conn()
         placeholders = ",".join("?" * len(addresses))
         lower_addrs = [a.lower() for a in addresses]
