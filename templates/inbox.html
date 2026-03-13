@@ -143,6 +143,9 @@ body.focus-mode #preview-body{font-family:'Georgia',serif;font-size:16px;line-he
 </style>
 
 <script>
+// Alias pour window.toast défini dans static/main.js
+function showToast(msg, type='info') { if (window.toast) window.toast(msg, type); }
+
 let currentFolder = '{{ folder }}';
 let currentPage = {{ page }};
 let totalPages = 1;
@@ -319,8 +322,14 @@ function mailMenu(uid, e) {
 }
 
 async function moveMailTo(uid, folder) {
-  await fetch(`/api/mail/${uid}/move`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder})})
-  showToast(`Déplacé vers ${folder}`, 'info'); loadMails();
+  const res = await fetch(`/api/mail/${uid}/move`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder})});
+  const data = await res.json();
+  if (data.success) {
+    showToast(`Déplacé vers ${folder}`, 'success');
+    loadMails();
+  } else {
+    showToast('Erreur lors du déplacement', 'error');
+  }
 }
 
 async function setFollowup(uid) {
@@ -367,8 +376,13 @@ function updateBulkBar() {
 async function bulkAction(action, idsOverride) {
   const ids = idsOverride || Array.from(selectedIds);
   if (!ids.length) return;
-  await fetch('/api/mails/bulk', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,action})});
-  showToast(`Action "${action}" sur ${ids.length} mail(s)`, 'success');
+  const res = await fetch('/api/mails/bulk', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,action})});
+  const data = await res.json();
+  if (data.success) {
+    showToast(`Action effectuée sur ${ids.length} mail(s)`, 'success');
+  } else {
+    showToast('Erreur lors de l\'action', 'error');
+  }
   selectedIds.clear();
   document.getElementById('select-all').checked = false;
   loadMails();
