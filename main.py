@@ -5,10 +5,10 @@ from fastapi.templating import Jinja2Templates
 from typing import Optional
 import uvicorn
 import os
+import json
 import database as db
 import auth
 import email_client
-from email_client import test_imap_connection
 from config import settings
 
 db.init_db()
@@ -169,17 +169,59 @@ async def profile(request: Request, user=Depends(auth.require_auth)):
 @app.post("/profile")
 async def update_profile(request: Request,
     display_name: str = Form(...),
-    mail_password: str = Form(default=""),
     new_password: str = Form(default=""),
     user=Depends(auth.require_auth)):
     updates = {"display_name": display_name}
-    if mail_password:
-        updates["mail_password"] = mail_password
     if new_password:
         updates["password"] = new_password
     db.update_user(user["id"], **updates)
     db.add_audit_log(user["id"], user["username"], "PROFILE_UPDATE")
     return RedirectResponse("/profile?success=1", status_code=302)
+
+# ============================================================
+# RESEND INBOUND WEBHOOK
+# ============================================================
+
+@app.post("/webhook/inbound")
+async def inbound_webhook(request: Request):
+    """
+    Endpoint appelé par Resend quand un mail est reçu sur le domaine.
+    Resend envoie un POST JSON avec les champs :
+      to (list), from (dict), subject, html, text, headers
+    Configurer dans Resend > Receiving > Webhook URL :
+      https://ton-app.serveirc.com/webhook/inbound
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Payload JSON invalide")
+
+    # Resend format : to = [{"email": "...", "name": "..."}]
+    to_list = payload.get("to", [])
+    mail_to = to_list[0].get("email", "") if to_list else ""
+
+    from_data = payload.get("from", {})
+    if isinstance(from_data, dict):
+        mail_from = from_data.get("email", "")
+    else:
+        mail_from = str(from_data)
+
+    subject  = payload.get("subject", "")
+    body_html = payload.get("html", "")
+    body_text = payload.get("text", "")
+    headers  = json.dumps(payload.get("headers", {}))
+
+    if mail_to:
+        db.save_inbound_mail(
+            mail_to=mail_to,
+            mail_from=mail_from,
+            subject=subject,
+            body_html=body_html,
+            body_text=body_text,
+            headers=headers,
+        )
+
+    return JSONResponse({"ok": True})
 
 # ============================================================
 # MODERATION MAILBOX
@@ -211,13 +253,10 @@ async def admin_users(request: Request, user=Depends(auth.require_perm("can_mana
 @app.post("/admin/users/create")
 async def admin_create_user(request: Request, user=Depends(auth.require_perm("can_create_accounts")),
     username: str = Form(...), display_name: str = Form(...), email: str = Form(...),
-    password: str = Form(...), role_id: int = Form(4), mail_password: str = Form(default=""),
+    password: str = Form(...), role_id: int = Form(4),
     mail_alias: str = Form(default="")):
     ip = auth.get_client_ip(request)
-    imap_host = db.get_setting("global_imap_host", "")
-    smtp_host = db.get_setting("global_smtp_host", "")
     ok, err = db.create_user(username, display_name, email, password, role_id,
-        imap_host=imap_host, smtp_host=smtp_host, mail_password=mail_password,
         mail_alias=mail_alias, mail_username=mail_alias)
     db.add_audit_log(user["id"], user["username"], "CREATE_USER", target=username, ip=ip)
     return RedirectResponse("/admin/users", status_code=302)
@@ -225,10 +264,8 @@ async def admin_create_user(request: Request, user=Depends(auth.require_perm("ca
 @app.post("/admin/users/{uid}/update")
 async def admin_update_user(request: Request, uid: int, user=Depends(auth.require_perm("can_manage_users")),
     display_name: str = Form(...), role_id: int = Form(...), is_active: int = Form(1),
-    is_banned: int = Form(0), mail_password: str = Form(default=""), mail_alias: str = Form(default="")):
+    is_banned: int = Form(0), mail_alias: str = Form(default="")):
     updates = {"display_name": display_name, "role_id": role_id, "is_active": is_active, "is_banned": is_banned}
-    if mail_password:
-        updates["mail_password"] = mail_password
     if mail_alias:
         updates["mail_alias"] = mail_alias
         updates["mail_username"] = mail_alias
@@ -318,22 +355,16 @@ async def api_folders(user=Depends(auth.require_auth)):
 
 @app.get("/api/mails")
 async def api_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20, user=Depends(auth.require_auth)):
-    result = email_client.get_mails(user, folder=folder, page=page, per_page=per_page)
-    alias = (user.get("mail_alias") or user.get("email", "")).lower()
-    if alias and result.get("mails"):
-        result["mails"] = [
-            m for m in result["mails"]
-            if alias in m.get("to", "").lower()
-        ]
-    return result
+    return email_client.get_mails(user, folder=folder, page=page, per_page=per_page)
 
 @app.get("/api/mail/{uid}")
 async def api_mail(uid: int, folder: str = "INBOX", user=Depends(auth.require_auth)):
     mail = email_client.get_mail(user, uid=str(uid), folder=folder)
+    if "error" in mail:
+        raise HTTPException(404, detail=mail["error"])
     alias = (user.get("mail_alias") or user.get("email", "")).lower()
-    if alias and "to" in mail:
-        if alias not in mail["to"].lower():
-            raise HTTPException(403, detail="Ce mail ne vous est pas adress\u00e9")
+    if alias and mail.get("to") and alias not in mail["to"].lower():
+        raise HTTPException(403, detail="Ce mail ne vous est pas adress\u00e9")
     return mail
 
 @app.post("/api/send")
@@ -356,44 +387,27 @@ async def api_delete(uid: int, folder: str = "INBOX", user=Depends(auth.require_
 @app.get("/api/moderation/mails")
 async def api_moderation_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20,
     user=Depends(auth.require_perm("can_view_all_mails"))):
-    admin_user = {"mail_alias": "", "email": db.get_setting("global_imap_user", "")}
-    return email_client.get_mails(admin_user, folder=folder, page=page, per_page=per_page)
-
-@app.post("/api/admin/test-imap-connection")
-async def api_test_imap(user=Depends(auth.require_perm("can_change_settings"))):
-    host = db.get_setting("global_imap_host", "")
-    port = int(db.get_setting("global_imap_port", "993"))
-    mail_user = db.get_setting("global_imap_user", "")
-    mail_pass = db.get_setting("global_mail_password", "")
-    if not host or not mail_user or not mail_pass:
-        return JSONResponse({"success": False, "error": "Param\u00e8tres IMAP incomplets"})
-    ok, result = test_imap_connection(host, port, mail_user, mail_pass)
-    return JSONResponse({"success": ok, "mailbox": result if ok else "", "error": result if not ok else ""})
-
-# Ancien endpoint conserve pour compatibilite
-@app.post("/api/admin/test-mail-connection")
-async def api_test_mail_compat(user=Depends(auth.require_perm("can_change_settings"))):
-    return await api_test_imap(user)
+    from database import get_inbound_mails
+    conn = __import__('database').get_conn()
+    offset = (page - 1) * per_page
+    total = conn.execute("SELECT COUNT(*) FROM inbound_mails WHERE folder=?", (folder,)).fetchone()[0]
+    rows = conn.execute(
+        "SELECT id, mail_from, mail_to, subject, seen, received_at FROM inbound_mails WHERE folder=? ORDER BY received_at DESC LIMIT ? OFFSET ?",
+        (folder, per_page, offset)
+    ).fetchall()
+    conn.close()
+    pages = max(1, (total + per_page - 1) // per_page)
+    mails = [{'uid': str(r['id']), 'from': r['mail_from'], 'to': r['mail_to'],
+               'subject': r['subject'] or '(Sans objet)', 'date': r['received_at'], 'seen': bool(r['seen'])} for r in rows]
+    return {'mails': mails, 'total': total, 'page': page, 'pages': pages}
 
 @app.post("/api/admin/test-smtp-connection")
 async def api_test_smtp(user=Depends(auth.require_perm("can_change_settings"))):
-    import smtplib
-    host = db.get_setting("global_smtp_host", "live.smtp.mailtrap.io")
-    port = int(db.get_setting("global_smtp_port", "587"))
-    smtp_user = db.get_setting("global_smtp_user", "api")
     smtp_pass = db.get_setting("global_smtp_password", "")
     if not smtp_pass:
-        return JSONResponse({"success": False, "error": "Cl\u00e9 API SMTP (password) manquante dans les param\u00e8tres"})
-    try:
-        server = smtplib.SMTP(host, port, timeout=10)
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(smtp_user, smtp_pass)
-        server.quit()
-        return JSONResponse({"success": True})
-    except Exception as e:
-        return JSONResponse({"success": False, "error": str(e)})
+        return JSONResponse({"success": False, "error": "Clé API Resend (SMTP_PASSWORD) manquante dans les paramètres"})
+    ok, result = email_client.test_smtp_connection(smtp_pass)
+    return JSONResponse({"success": ok, "message": result if ok else "", "error": result if not ok else ""})
 
 @app.get("/api/stats")
 async def api_stats(user=Depends(auth.require_auth)):

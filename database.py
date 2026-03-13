@@ -83,18 +83,26 @@ def init_db():
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         role_id INTEGER DEFAULT 4,
-        imap_host TEXT DEFAULT '',
-        imap_port INTEGER DEFAULT 993,
-        smtp_host TEXT DEFAULT '',
-        smtp_port INTEGER DEFAULT 587,
-        mail_password TEXT DEFAULT '',
-        mail_username TEXT DEFAULT '',
         mail_alias TEXT DEFAULT '',
+        mail_username TEXT DEFAULT '',
         is_active INTEGER DEFAULT 1,
         is_banned INTEGER DEFAULT 0,
         avatar_color TEXT DEFAULT '#6C63FF',
         last_login TEXT DEFAULT '',
         created_at TEXT DEFAULT (datetime('now'))
+    )""")
+
+    c.execute("""CREATE TABLE IF NOT EXISTS inbound_mails (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mail_to TEXT NOT NULL,
+        mail_from TEXT NOT NULL,
+        subject TEXT DEFAULT '',
+        body_html TEXT DEFAULT '',
+        body_text TEXT DEFAULT '',
+        headers TEXT DEFAULT '',
+        seen INTEGER DEFAULT 0,
+        folder TEXT DEFAULT 'INBOX',
+        received_at TEXT DEFAULT (datetime('now'))
     )""")
 
     c.execute("""CREATE TABLE IF NOT EXISTS pending_users (
@@ -133,13 +141,10 @@ def init_db():
         updated_at TEXT DEFAULT (datetime('now'))
     )""")
 
-    # Migrations colonnes users
-    for col, typedef in [
-        ("mail_username", "TEXT DEFAULT ''"),
-        ("mail_alias", "TEXT DEFAULT ''"),
-    ]:
+    # Migrations — suppression des colonnes IMAP/SMTP par user (obsolètes)
+    for col in ["mail_username", "mail_alias"]:
         try:
-            c.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
+            c.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT DEFAULT ''")
             conn.commit()
         except:
             pass
@@ -182,18 +187,10 @@ def init_db():
         ("maintenance_mode", "0"),
         ("site_name", "serveircMail"),
         ("max_users", "100"),
-        # IMAP (reception)
-        ("global_imap_host", os.getenv("IMAP_HOST", "imap.gmail.com")),
-        ("global_imap_port", os.getenv("IMAP_PORT", "993")),
-        ("global_imap_user", os.getenv("IMAP_USER", "")),
-        ("global_mail_password", os.getenv("EMAIL_PASSWORD", "")),
-        # SMTP (envoi Mailtrap)
-        ("global_smtp_host", os.getenv("SMTP_HOST", "live.smtp.mailtrap.io")),
-        ("global_smtp_port", os.getenv("SMTP_PORT", "587")),
-        ("global_smtp_user", os.getenv("SMTP_USER", "api")),
+        # SMTP Resend
         ("global_smtp_password", os.getenv("SMTP_PASSWORD", "")),
-        ("global_smtp_encryption", "TLS"),
-        ("mail_domain", ""),
+        # Domaine mail
+        ("mail_domain", os.getenv("MAIL_DOMAIN", "")),
     ]
     for k, v in defaults:
         c.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES (?,?)", (k, v))
@@ -263,7 +260,7 @@ def get_all_users(search: str = "", page: int = 1, per_page: int = 20):
     conn.close()
     return [dict(u) for u in users], total
 
-def create_user(username, display_name, email, password, role_id=4, imap_host="", imap_port=993, smtp_host="", smtp_port=587, mail_password="", mail_username="", mail_alias=""):
+def create_user(username, display_name, email, password, role_id=4, mail_alias="", mail_username="", **kwargs):
     conn = get_conn()
     hashed = _hash_password(password)
     colors = ["#6C63FF", "#3EC6E0", "#FF6584", "#4ade80", "#fbbf24", "#f472b6"]
@@ -271,8 +268,8 @@ def create_user(username, display_name, email, password, role_id=4, imap_host=""
     color = random.choice(colors)
     try:
         conn.execute(
-            "INSERT INTO users (username, display_name, email, password_hash, role_id, imap_host, imap_port, smtp_host, smtp_port, mail_password, mail_username, mail_alias, avatar_color) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (username, display_name, email, hashed, role_id, imap_host, imap_port, smtp_host, smtp_port, mail_password, mail_username, mail_alias, color)
+            "INSERT INTO users (username, display_name, email, password_hash, role_id, mail_alias, mail_username, avatar_color) VALUES (?,?,?,?,?,?,?,?)",
+            (username, display_name, email, hashed, role_id, mail_alias, mail_username, color)
         )
         conn.commit()
         conn.close()
@@ -285,6 +282,9 @@ def update_user(user_id, **kwargs):
     conn = get_conn()
     if "password" in kwargs:
         kwargs["password_hash"] = _hash_password(kwargs.pop("password"))
+    # Supprimer les champs obsolètes IMAP/SMTP s'ils arrivent encore
+    for obsolete in ["imap_host", "imap_port", "smtp_host", "smtp_port", "mail_password"]:
+        kwargs.pop(obsolete, None)
     fields = ", ".join(f"{k}=?" for k in kwargs)
     values = list(kwargs.values()) + [user_id]
     conn.execute(f"UPDATE users SET {fields} WHERE id=?", values)
@@ -478,6 +478,73 @@ def get_all_settings():
     rows = conn.execute("SELECT * FROM system_settings").fetchall()
     conn.close()
     return {r["key"]: r["value"] for r in rows}
+
+# ========== INBOUND MAILS (Resend webhook) ==========
+
+def save_inbound_mail(mail_to: str, mail_from: str, subject: str, body_html: str, body_text: str, headers: str = "", folder: str = "INBOX"):
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO inbound_mails (mail_to, mail_from, subject, body_html, body_text, headers, folder) VALUES (?,?,?,?,?,?,?)",
+        (mail_to.lower(), mail_from, subject, body_html, body_text, headers, folder)
+    )
+    conn.commit()
+    conn.close()
+
+def get_inbound_mails(mail_to: str, folder: str = "INBOX", page: int = 1, per_page: int = 20):
+    conn = get_conn()
+    offset = (page - 1) * per_page
+    total = conn.execute(
+        "SELECT COUNT(*) FROM inbound_mails WHERE mail_to=? AND folder=?",
+        (mail_to.lower(), folder)
+    ).fetchone()[0]
+    rows = conn.execute(
+        "SELECT id, mail_from, mail_to, subject, seen, received_at FROM inbound_mails WHERE mail_to=? AND folder=? ORDER BY received_at DESC LIMIT ? OFFSET ?",
+        (mail_to.lower(), folder, per_page, offset)
+    ).fetchall()
+    conn.close()
+    pages = max(1, (total + per_page - 1) // per_page)
+    mails = []
+    for r in rows:
+        mails.append({
+            'uid': str(r['id']),
+            'from': r['mail_from'],
+            'to': r['mail_to'],
+            'subject': r['subject'] or '(Sans objet)',
+            'date': r['received_at'],
+            'seen': bool(r['seen']),
+        })
+    return {'mails': mails, 'total': total, 'page': page, 'pages': pages}
+
+def get_inbound_mail_by_id(mail_id: int):
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM inbound_mails WHERE id=?", (mail_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {
+        'uid': str(row['id']),
+        'subject': row['subject'] or '(Sans objet)',
+        'from': row['mail_from'],
+        'to': row['mail_to'],
+        'date': row['received_at'],
+        'body_html': row['body_html'],
+        'body_text': row['body_text'],
+        'seen': bool(row['seen']),
+        'folder': row['folder'],
+    }
+
+def mark_inbound_mail_seen(mail_id: int):
+    conn = get_conn()
+    conn.execute("UPDATE inbound_mails SET seen=1 WHERE id=?", (mail_id,))
+    conn.commit()
+    conn.close()
+
+def delete_inbound_mail(mail_id: int):
+    conn = get_conn()
+    result = conn.execute("DELETE FROM inbound_mails WHERE id=?", (mail_id,))
+    conn.commit()
+    conn.close()
+    return result.rowcount > 0
 
 # ========== STATS ==========
 

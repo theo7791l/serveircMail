@@ -1,177 +1,61 @@
-import imaplib
 import smtplib
-import email as email_lib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.header import decode_header
 import os
 
 
-def _get_mail_config(user: dict) -> dict:
+def _get_smtp_config() -> dict:
     from database import get_setting
+    return {
+        'smtp_host': 'smtp.resend.com',
+        'smtp_port': 587,
+        'smtp_user': 'resend',
+        'smtp_pass': get_setting('global_smtp_password') or os.getenv('SMTP_PASSWORD', ''),
+        'mail_domain': get_setting('mail_domain') or os.getenv('MAIL_DOMAIN', ''),
+    }
 
-    # IMAP (reception via Gmail + ImprovMX forward)
-    imap_host = user.get('imap_host') or get_setting('global_imap_host') or os.getenv('IMAP_HOST', 'imap.gmail.com')
-    imap_port = int(user.get('imap_port') or get_setting('global_imap_port', '993') or 993)
-    imap_user = get_setting('global_imap_user') or os.getenv('IMAP_USER', '')
-    imap_pass = get_setting('global_mail_password') or os.getenv('EMAIL_PASSWORD', '')
 
-    # SMTP (envoi via Mailtrap)
-    smtp_host = get_setting('global_smtp_host') or os.getenv('SMTP_HOST', 'live.smtp.mailtrap.io')
-    smtp_port = int(get_setting('global_smtp_port', '587') or 587)
-    smtp_user = get_setting('global_smtp_user') or os.getenv('SMTP_USER', 'api')
-    smtp_pass = get_setting('global_smtp_password') or os.getenv('SMTP_PASSWORD', '')
-
-    # Alias = adresse From affichee au destinataire (ex: jean@youtube.serveirc.com)
-    alias = (
+def _get_alias(user: dict, cfg: dict) -> str:
+    return (
         user.get('mail_alias')
         or user.get('mail_username')
         or user.get('email', '')
     )
 
-    return {
-        'imap_host': imap_host,
-        'imap_port': imap_port,
-        'imap_user': imap_user,
-        'imap_pass': imap_pass,
-        'smtp_host': smtp_host,
-        'smtp_port': smtp_port,
-        'smtp_user': smtp_user,
-        'smtp_pass': smtp_pass,
-        'alias':     alias,
-    }
 
-
-def get_imap_connection(user: dict):
-    cfg = _get_mail_config(user)
-    mail = imaplib.IMAP4_SSL(cfg['imap_host'], cfg['imap_port'])
-    mail.login(cfg['imap_user'], cfg['imap_pass'])
-    return mail
-
+# ── Dossiers (statiques — Resend Inbound stocke tout en BDD) ──────────────────
 
 def get_folders(user: dict):
-    try:
-        mail = get_imap_connection(user)
-        status, folders = mail.list()
-        mail.logout()
-        result = []
-        for f in folders:
-            if isinstance(f, bytes):
-                parts = f.decode().split('" ')
-                name = parts[-1].strip().strip('"')
-                result.append(name)
-        return result if result else ['INBOX']
-    except Exception:
-        return ['INBOX']
+    return ['INBOX', 'Sent', 'Trash']
 
+
+# ── Lecture des mails (depuis la BDD, alimentée par le webhook Inbound) ────────
 
 def get_mails(user: dict, folder: str = 'INBOX', page: int = 1, per_page: int = 20):
-    try:
-        mail = get_imap_connection(user)
-        mail.select(f'"{folder}"')
-        status, data = mail.search(None, 'ALL')
-        uids = data[0].split()
-        uids.reverse()
-        total = len(uids)
-        pages = max(1, (total + per_page - 1) // per_page)
-        start = (page - 1) * per_page
-        page_uids = uids[start:start + per_page]
-        mails = []
-        for uid in page_uids:
-            try:
-                status, msg_data = mail.fetch(uid, '(FLAGS BODY[HEADER.FIELDS (FROM TO SUBJECT DATE)])')
-                raw = msg_data[0][1]
-                msg = email_lib.message_from_bytes(raw)
-                flags = msg_data[0][0].decode() if msg_data[0][0] else ''
-                seen = '\\Seen' in flags
-
-                def _decode_header(value):
-                    parts = decode_header(value or '')
-                    result = ''
-                    for part, enc in parts:
-                        if isinstance(part, bytes):
-                            result += part.decode(enc or 'utf-8', errors='replace')
-                        else:
-                            result += str(part)
-                    return result
-
-                mails.append({
-                    'uid': uid.decode(),
-                    'from': _decode_header(msg.get('From', '')),
-                    'to': msg.get('To', ''),
-                    'subject': _decode_header(msg.get('Subject', '')) or '(Sans objet)',
-                    'date': msg.get('Date', ''),
-                    'seen': seen,
-                })
-            except Exception:
-                continue
-        mail.logout()
-        return {'mails': mails, 'total': total, 'page': page, 'pages': pages}
-    except Exception as e:
-        return {'mails': [], 'total': 0, 'page': 1, 'pages': 1, 'error': str(e)}
+    from database import get_inbound_mails
+    alias = (user.get('mail_alias') or user.get('email', '')).lower()
+    return get_inbound_mails(mail_to=alias, folder=folder, page=page, per_page=per_page)
 
 
 def get_mail(user: dict, uid: str, folder: str = 'INBOX'):
-    try:
-        mail = get_imap_connection(user)
-        mail.select(f'"{folder}"')
-        status, data = mail.fetch(uid.encode(), '(RFC822)')
-        raw = data[0][1]
-        msg = email_lib.message_from_bytes(raw)
-        mail.store(uid.encode(), '+FLAGS', '\\Seen')
-        mail.logout()
+    from database import get_inbound_mail_by_id, mark_inbound_mail_seen
+    mail = get_inbound_mail_by_id(int(uid))
+    if mail:
+        mark_inbound_mail_seen(int(uid))
+    return mail or {'error': 'Mail introuvable'}
 
-        def _decode_header(value):
-            parts = decode_header(value or '')
-            result = ''
-            for part, enc in parts:
-                if isinstance(part, bytes):
-                    result += part.decode(enc or 'utf-8', errors='replace')
-                else:
-                    result += str(part)
-            return result
 
-        body_html = None
-        body_text = ''
-        if msg.is_multipart():
-            for part in msg.walk():
-                ct = part.get_content_type()
-                cd = str(part.get('Content-Disposition', ''))
-                if 'attachment' in cd:
-                    continue
-                if ct == 'text/html' and not body_html:
-                    charset = part.get_content_charset() or 'utf-8'
-                    body_html = part.get_payload(decode=True).decode(charset, errors='replace')
-                elif ct == 'text/plain' and not body_text:
-                    charset = part.get_content_charset() or 'utf-8'
-                    body_text = part.get_payload(decode=True).decode(charset, errors='replace')
-        else:
-            charset = msg.get_content_charset() or 'utf-8'
-            payload = msg.get_payload(decode=True)
-            if payload:
-                body_text = payload.decode(charset, errors='replace')
-
-        return {
-            'subject': _decode_header(msg.get('Subject', '')) or '(Sans objet)',
-            'from': _decode_header(msg.get('From', '')),
-            'to': msg.get('To', ''),
-            'date': msg.get('Date', ''),
-            'body_html': body_html,
-            'body_text': body_text,
-        }
-    except Exception as e:
-        return {'error': str(e)}
-
+# ── Envoi via Resend SMTP ──────────────────────────────────────────────────────
 
 def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False):
     """
-    Envoi via Mailtrap SMTP (live.smtp.mailtrap.io, port 587, STARTTLS).
-    - Login : SMTP_USER="api" + SMTP_PASSWORD=cle_api_mailtrap
-    - From: = alias de l'utilisateur (ex: jean@youtube.serveirc.com)
-    - Le domaine serveirc.com doit etre verifie dans Mailtrap > Email API/SMTP > Domains
+    Envoi via Resend SMTP (smtp.resend.com:587 STARTTLS).
+    Login : user="resend" + password=cle_api_resend
+    From  : alias de l'utilisateur (ex: jean@tondomaine.com)
+    Le domaine doit être vérifié dans Resend > Domains.
     """
-    cfg = _get_mail_config(user)
-    from_addr = cfg['alias'] or cfg['imap_user']
+    cfg = _get_smtp_config()
+    from_addr = _get_alias(user, cfg)
 
     try:
         msg = MIMEMultipart('alternative')
@@ -190,7 +74,6 @@ def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False):
         server.starttls()
         server.ehlo()
         server.login(cfg['smtp_user'], cfg['smtp_pass'])
-        # envelope sender = alias (autorise car domaine verifie dans Mailtrap)
         server.sendmail(from_addr, to, msg.as_string())
         server.quit()
         return True, None
@@ -198,25 +81,24 @@ def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False):
         return False, str(e)
 
 
+# ── Suppression (BDD) ──────────────────────────────────────────────────────────
+
 def delete_mail(user: dict, uid: str, folder: str = 'INBOX'):
-    try:
-        mail = get_imap_connection(user)
-        mail.select(f'"{folder}"')
-        mail.store(uid.encode(), '+FLAGS', '\\Deleted')
-        mail.expunge()
-        mail.logout()
-        return True, None
-    except Exception as e:
-        return False, str(e)
+    from database import delete_inbound_mail
+    ok = delete_inbound_mail(int(uid))
+    return (True, None) if ok else (False, 'Mail introuvable')
 
 
-def test_imap_connection(imap_host: str, imap_port: int, mail_user: str, mail_pass: str):
+# ── Test de connexion SMTP Resend ─────────────────────────────────────────────
+
+def test_smtp_connection(smtp_pass: str):
     try:
-        mail = imaplib.IMAP4_SSL(imap_host, imap_port)
-        mail.login(mail_user, mail_pass)
-        status, data = mail.select('INBOX')
-        count = data[0].decode() if data[0] else '0'
-        mail.logout()
-        return True, f'INBOX ({count} messages)'
+        server = smtplib.SMTP('smtp.resend.com', 587, timeout=10)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login('resend', smtp_pass)
+        server.quit()
+        return True, 'Connexion Resend SMTP réussie'
     except Exception as e:
         return False, str(e)
