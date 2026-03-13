@@ -4,7 +4,6 @@ import secrets
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 
-# Le DB_PATH est bootstrappé depuis l'env, mais peut être surchargé en BDD
 DB_PATH = os.getenv("DB_PATH", "/home/container/awlor.db")
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -171,19 +170,15 @@ def init_db():
     conn.commit()
     conn.close()
 
-    # Resync OBLIGATOIRE des permissions des rôles système à chaque démarrage.
-    # INSERT OR IGNORE ne met pas à jour les lignes existantes, donc de nouvelles
-    # permissions ajoutées en code ne seraient jamais assignées aux rôles existants.
     _sync_system_role_permissions()
 
-    # Toutes les clés configurables depuis le panel
     defaults = [
         ("allow_registration", "1"),
         ("maintenance_mode", "0"),
         ("site_name", "Awlor"),
         ("max_users", "100"),
         ("mail_domain", os.getenv("MAIL_DOMAIN", "awlor.online")),
-        ("global_smtp_password", os.getenv("SMTP_PASSWORD", "")),
+        ("global_smtp_password", os.getenv("RESEND_API_KEY", os.getenv("SMTP_PASSWORD", ""))),
         ("webhook_url", os.getenv("WEBHOOK_URL", "https://awlor.online/webhook/inbound")),
         ("webhook_secret", os.getenv("WEBHOOK_SECRET", "")),
         ("app_port", os.getenv("PORT", "15431")),
@@ -205,9 +200,6 @@ def init_db():
     _create_super_admin()
 
 def _sync_system_role_permissions():
-    """Resynchronise les permissions des rôles système à chaque démarrage.
-    Garantit que toute nouvelle perm ajoutée dans ROLE_PERMISSIONS est bien
-    assignée, sans toucher aux rôles custom créés par l'admin."""
     conn = get_conn()
     c = conn.cursor()
     for role_name, perms in ROLE_PERMISSIONS.items():
@@ -215,7 +207,6 @@ def _sync_system_role_permissions():
         if not row:
             continue
         role_id = row["id"]
-        # Supprimer uniquement les perms du rôle système, puis les réinsérer proprement
         c.execute("DELETE FROM role_permissions WHERE role_id=?", (role_id,))
         for perm in perms:
             c.execute(
@@ -226,7 +217,6 @@ def _sync_system_role_permissions():
     conn.close()
 
 def _create_super_admin():
-    """Crée le super admin en lisant les valeurs depuis la BDD (priorité) puis le .env."""
     sa_user = get_setting("super_admin_username") or os.getenv("SUPER_ADMIN_USERNAME", "admin")
     sa_pass = get_setting("super_admin_password") or os.getenv("SUPER_ADMIN_PASSWORD", "admin1234")
     sa_email = get_setting("super_admin_email") or os.getenv("SUPER_ADMIN_EMAIL", "admin@awlor.online")
@@ -585,7 +575,7 @@ def save_inbound_mail(mail_to: str, mail_from: str, subject: str, body_html: str
     conn = get_conn()
     conn.execute(
         "INSERT INTO inbound_mails (mail_to, mail_from, subject, body_html, body_text, headers, folder) VALUES (?,?,?,?,?,?,?)",
-        (mail_to.lower(), mail_from, subject, body_html, body_text, headers, folder)
+        (mail_to.lower(), mail_from.lower(), subject, body_html, body_text, headers, folder)
     )
     conn.commit()
     conn.close()
@@ -608,18 +598,28 @@ def get_inbound_mails(mail_to: str, folder: str = "INBOX", page: int = 1, per_pa
     return {'mails': mails, 'total': total, 'page': page, 'pages': pages}
 
 def get_inbound_mails_multi(addresses: list, folder: str = "INBOX", page: int = 1, per_page: int = 20):
+    """
+    Pour INBOX/Trash : filtre par mail_to IN (adresses de l'utilisateur).
+    Pour Sent        : filtre par mail_from IN (adresses de l'utilisateur).
+    """
     if not addresses:
         return {'mails': [], 'total': 0, 'page': 1, 'pages': 1}
     conn = get_conn()
     offset = (page - 1) * per_page
     placeholders = ",".join("?" * len(addresses))
     lower_addrs = [a.lower() for a in addresses]
+
+    if folder == "Sent":
+        field = "mail_from"
+    else:
+        field = "mail_to"
+
     total = conn.execute(
-        f"SELECT COUNT(*) FROM inbound_mails WHERE mail_to IN ({placeholders}) AND folder=?",
+        f"SELECT COUNT(*) FROM inbound_mails WHERE {field} IN ({placeholders}) AND folder=?",
         lower_addrs + [folder]
     ).fetchone()[0]
     rows = conn.execute(
-        f"SELECT id, mail_from, mail_to, subject, seen, received_at FROM inbound_mails WHERE mail_to IN ({placeholders}) AND folder=? ORDER BY received_at DESC LIMIT ? OFFSET ?",
+        f"SELECT id, mail_from, mail_to, subject, seen, received_at FROM inbound_mails WHERE {field} IN ({placeholders}) AND folder=? ORDER BY received_at DESC LIMIT ? OFFSET ?",
         lower_addrs + [folder, per_page, offset]
     ).fetchall()
     conn.close()
