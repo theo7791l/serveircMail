@@ -39,6 +39,28 @@ def get_conn():
 def _hash_password(password: str) -> str:
     return pwd_context.hash(password.encode('utf-8')[:72])
 
+def _migrate_db():
+    """Ajoute les colonnes manquantes sur les tables existantes (migration safe)."""
+    conn = get_conn()
+    c = conn.cursor()
+
+    # Colonnes à ajouter sur inbound_mails si absentes
+    migrations = [
+        ("inbound_mails", "seen", "INTEGER DEFAULT 0"),
+        ("inbound_mails", "starred", "INTEGER DEFAULT 0"),
+        ("inbound_mails", "folder", "TEXT DEFAULT 'INBOX'"),
+        ("inbound_mails", "expires_at", "TEXT DEFAULT NULL"),
+        ("inbound_mails", "auto_destroy", "INTEGER DEFAULT 0"),
+    ]
+
+    for table, column, col_def in migrations:
+        existing = [row[1] for row in c.execute(f"PRAGMA table_info({table})").fetchall()]
+        if column not in existing:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
+
+    conn.commit()
+    conn.close()
+
 def init_db():
     conn = get_conn()
     c = conn.cursor()
@@ -328,6 +350,9 @@ def init_db():
     conn2.close()
 
     _create_super_admin()
+
+    # Migration des colonnes manquantes (DB existante avant ajout de colonnes)
+    _migrate_db()
 
 def _sync_system_role_permissions():
     conn = get_conn()
@@ -1143,7 +1168,6 @@ def get_notification_prefs(user_id: int) -> dict:
     conn.close()
     if row:
         return dict(row)
-    # Defaults si pas encore de ligne
     return {
         "user_id": user_id,
         "notify_new_mail": 1,
