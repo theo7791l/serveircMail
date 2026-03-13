@@ -9,6 +9,56 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <style>
+    /* ===== COOKIE BANNER ===== */
+    #cookie-banner {
+      display: none;
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 99999;
+      background: rgba(20,20,36,0.97);
+      border: 1px solid rgba(108,99,255,0.35);
+      backdrop-filter: blur(20px);
+      border-radius: 16px;
+      padding: 18px 24px;
+      max-width: 560px;
+      width: calc(100% - 48px);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      animation: slideUp 0.3s ease;
+    }
+    #cookie-banner.hidden { display: none !important; }
+    @keyframes slideUp { from { opacity:0; transform: translateX(-50%) translateY(20px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
+    #cookie-banner p { margin: 0; font-size: 0.88rem; color: #c0c0d8; line-height: 1.6; }
+    #cookie-banner a { color: #a78bfa; text-decoration: underline; }
+    .cookie-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn-cookie-accept {
+      padding: 8px 20px; border-radius: 8px; border: none; cursor: pointer;
+      background: linear-gradient(135deg, #6C63FF, #a78bfa);
+      color: #fff; font-size: 0.85rem; font-weight: 600; font-family: inherit;
+    }
+    .btn-cookie-accept:hover { opacity: 0.9; }
+    .btn-cookie-decline {
+      padding: 8px 20px; border-radius: 8px; border: 1px solid rgba(108,99,255,0.3); cursor: pointer;
+      background: transparent; color: #888; font-size: 0.85rem; font-family: inherit;
+    }
+    .btn-cookie-decline:hover { color: #c0c0d8; }
+    /* ===== FOOTER LÉGAL ===== */
+    .legal-footer {
+      text-align: center;
+      padding: 16px;
+      font-size: 0.78rem;
+      color: #555;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      margin-top: auto;
+    }
+    .legal-footer a { color: #6C63FF; text-decoration: none; margin: 0 8px; }
+    .legal-footer a:hover { color: #a78bfa; }
+  </style>
 </head>
 <body>
   <canvas id="particles-canvas"></canvas>
@@ -50,7 +100,6 @@
           <i class="fa fa-pen-to-square nav-icon"></i><span>Composer</span>
         </a>
 
-        <!-- Dynamic folders -->
         <div id="folders-list"></div>
 
         {% if 'can_view_stats' in user_perms or 'can_manage_users' in user_perms or 'can_manage_roles' in user_perms or 'can_view_logs' in user_perms or 'can_change_settings' in user_perms %}
@@ -87,6 +136,11 @@
         <a href="/logout" class="nav-item" style="color:var(--accent2)">
           <i class="fa fa-right-from-bracket nav-icon"></i><span>Déconnexion</span>
         </a>
+        <div class="legal-footer">
+          <a href="/privacy">Confidentialité</a>
+          <a href="/cookies">Cookies</a>
+          <a href="/terms">CGU</a>
+        </div>
       </div>
     </aside>
 
@@ -111,8 +165,38 @@
   {% block auth_content %}{% endblock %}
   {% endif %}
 
+  <!-- BANNIÈRE COOKIE RGPD -->
+  <div id="cookie-banner" class="hidden">
+    <p>
+      🍪 Nous utilisons uniquement des cookies strictement nécessaires au fonctionnement du service (session).
+      En continuant à utiliser Awlor, vous acceptez notre <a href="/cookies">politique de cookies</a> et notre <a href="/privacy">politique de confidentialité</a>.
+    </p>
+    <div class="cookie-actions">
+      <button class="btn-cookie-accept" onclick="acceptCookies()">Accepter</button>
+      <button class="btn-cookie-decline" onclick="declineCookies()">Refuser les non-essentiels</button>
+    </div>
+  </div>
+
   <div id="toast-container"></div>
   <script src="/static/main.js"></script>
+  <script>
+    // Bannière cookie
+    (function() {
+      var consent = localStorage.getItem('awlor_cookie_consent');
+      if (!consent) {
+        var banner = document.getElementById('cookie-banner');
+        if (banner) { banner.classList.remove('hidden'); }
+      }
+    })();
+    function acceptCookies() {
+      localStorage.setItem('awlor_cookie_consent', 'accepted');
+      document.getElementById('cookie-banner').classList.add('hidden');
+    }
+    function declineCookies() {
+      localStorage.setItem('awlor_cookie_consent', 'declined');
+      document.getElementById('cookie-banner').classList.add('hidden');
+    }
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
