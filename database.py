@@ -253,6 +253,18 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )""")
 
+    # Notification preferences
+    c.execute("""CREATE TABLE IF NOT EXISTS notification_prefs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL UNIQUE,
+        notify_new_mail INTEGER DEFAULT 1,
+        notify_weekly_digest INTEGER DEFAULT 0,
+        notify_followup INTEGER DEFAULT 1,
+        notify_snooze_wakeup INTEGER DEFAULT 1,
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )""")
+
     default_roles = [
         ("SUPER_ADMIN", "Super Admin", "#FF6584", "Contrôle total du système", 1),
         ("ADMIN", "Admin", "#6C63FF", "Gestion des comptes et paramètres", 1),
@@ -1121,6 +1133,120 @@ def clear_ai_history(user_id: int):
     conn.execute("DELETE FROM ai_conversations WHERE user_id=?", (user_id,))
     conn.commit()
     conn.close()
+
+# ========== NOTIFICATION PREFERENCES ==========
+
+def get_notification_prefs(user_id: int) -> dict:
+    """Retourne les préférences de notification d'un utilisateur (avec defaults)."""
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM notification_prefs WHERE user_id=?", (user_id,)).fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    # Defaults si pas encore de ligne
+    return {
+        "user_id": user_id,
+        "notify_new_mail": 1,
+        "notify_weekly_digest": 0,
+        "notify_followup": 1,
+        "notify_snooze_wakeup": 1,
+    }
+
+def save_notification_prefs(user_id: int, data: dict):
+    """Sauvegarde (upsert) les préférences de notification d'un utilisateur."""
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO notification_prefs (user_id, notify_new_mail, notify_weekly_digest, notify_followup, notify_snooze_wakeup, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(user_id) DO UPDATE SET
+            notify_new_mail=excluded.notify_new_mail,
+            notify_weekly_digest=excluded.notify_weekly_digest,
+            notify_followup=excluded.notify_followup,
+            notify_snooze_wakeup=excluded.notify_snooze_wakeup,
+            updated_at=excluded.updated_at
+    """, (
+        user_id,
+        int(data.get("notify_new_mail", 1)),
+        int(data.get("notify_weekly_digest", 0)),
+        int(data.get("notify_followup", 1)),
+        int(data.get("notify_snooze_wakeup", 1)),
+    ))
+    conn.commit()
+    conn.close()
+
+# ========== EXPORT ==========
+
+def get_all_mails_for_export(addresses: list, folder: str = "INBOX") -> list:
+    """Retourne tous les mails d'un dossier pour les adresses données (export CSV/ZIP)."""
+    if not addresses:
+        return []
+    conn = get_conn()
+    placeholders = ",".join("?" * len(addresses))
+    lower_addrs = [a.lower() for a in addresses]
+    field = "mail_from" if folder == "Sent" else "mail_to"
+    rows = conn.execute(
+        f"SELECT id, received_at, mail_from, mail_to, subject, seen, starred, body_text, body_html, folder "
+        f"FROM inbound_mails WHERE {field} IN ({placeholders}) AND folder=? ORDER BY received_at DESC",
+        lower_addrs + [folder]
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+# ========== WEEKLY DIGEST ==========
+
+def get_weekly_stats(user_id: int, addresses: list) -> dict:
+    """Retourne les statistiques de la semaine courante pour le digest hebdomadaire."""
+    if not addresses:
+        return {}
+    conn = get_conn()
+    placeholders = ",".join("?" * len(addresses))
+    lower_addrs = [a.lower() for a in addresses]
+
+    received = conn.execute(
+        f"SELECT COUNT(*) FROM inbound_mails WHERE mail_to IN ({placeholders}) "
+        f"AND folder='INBOX' AND received_at >= datetime('now', '-7 days')",
+        lower_addrs
+    ).fetchone()[0]
+
+    sent = conn.execute(
+        f"SELECT COUNT(*) FROM inbound_mails WHERE mail_from IN ({placeholders}) "
+        f"AND folder='Sent' AND received_at >= datetime('now', '-7 days')",
+        lower_addrs
+    ).fetchone()[0]
+
+    unread = conn.execute(
+        f"SELECT COUNT(*) FROM inbound_mails WHERE mail_to IN ({placeholders}) "
+        f"AND folder='INBOX' AND seen=0",
+        lower_addrs
+    ).fetchone()[0]
+
+    followups = conn.execute(
+        "SELECT COUNT(*) FROM followup_tracker WHERE user_id=? AND notified=0",
+        (user_id,)
+    ).fetchone()[0]
+
+    snoozed = conn.execute(
+        "SELECT COUNT(*) FROM snoozed_mails WHERE user_id=?",
+        (user_id,)
+    ).fetchone()[0]
+
+    conn.close()
+    return {
+        "received": received,
+        "sent": sent,
+        "unread": unread,
+        "followups": followups,
+        "snoozed": snoozed,
+    }
+
+def get_all_active_users() -> list:
+    """Retourne tous les utilisateurs actifs non bannis (pour le digest admin)."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT id, username, display_name, email FROM users WHERE is_active=1 AND is_banned=0"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 # ========== STATS ==========
 
