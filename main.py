@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Form, HTTPException, Depends, Cookie
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import Optional
@@ -152,7 +152,7 @@ async def logout(request: Request):
     return resp
 
 # ============================================================
-# PAGES LÉGALES (RGPD)
+# PAGES LÉGALES & SEO
 # ============================================================
 
 @app.get("/privacy", response_class=HTMLResponse)
@@ -166,6 +166,31 @@ async def cookies_page(request: Request):
 @app.get("/terms", response_class=HTMLResponse)
 async def terms_page(request: Request):
     return templates.TemplateResponse("terms.html", {"request": request})
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt():
+    content = """User-agent: *
+Disallow: /admin
+Disallow: /api
+Disallow: /webhook
+Disallow: /moderation
+
+Sitemap: https://awlor.online/sitemap.xml
+"""
+    return PlainTextResponse(content, media_type="text/plain")
+
+@app.get("/sitemap.xml")
+async def sitemap_xml():
+    content = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://awlor.online/</loc></url>
+  <url><loc>https://awlor.online/login</loc></url>
+  <url><loc>https://awlor.online/register</loc></url>
+  <url><loc>https://awlor.online/privacy</loc></url>
+  <url><loc>https://awlor.online/cookies</loc></url>
+  <url><loc>https://awlor.online/terms</loc></url>
+</urlset>"""
+    return PlainTextResponse(content, media_type="application/xml")
 
 # ============================================================
 # MAIL ROUTES
