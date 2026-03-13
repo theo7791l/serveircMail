@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Form, HTTPException, Depends, Cookie
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import Optional
@@ -11,9 +11,11 @@ import httpx
 import database as db
 import auth
 import email_client
+import scheduler
 from config import settings
 
 db.init_db()
+scheduler.start_scheduler()
 
 app = FastAPI(title="Awlor", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -111,15 +113,15 @@ async def register(request: Request,
     site_name = db.get_setting("site_name", "Awlor")
     body = (
         f"Bonjour {display_name},\n\n"
-        f"Votre code de vérification pour activer votre compte {site_name} est :\n\n"
+        f"Votre code de v\u00e9rification pour activer votre compte {site_name} est :\n\n"
         f"    {code}\n\n"
         f"Ce code expire dans 15 minutes.\n\n"
-        f"L'équipe {site_name}"
+        f"L'\u00e9quipe {site_name}"
     )
     email_client.send_mail(
         user=None,
         to=email,
-        subject=f"[{site_name}] Code de vérification",
+        subject=f"[{site_name}] Code de v\u00e9rification",
         body=body,
         from_address=f"noreply@{mail_domain}"
     )
@@ -154,7 +156,7 @@ async def logout(request: Request):
     return resp
 
 # ============================================================
-# PAGES LÉGALES & SEO
+# PAGES L\u00c9GALES & SEO
 # ============================================================
 
 @app.get("/privacy", response_class=HTMLResponse)
@@ -235,7 +237,8 @@ async def profile(request: Request, user=Depends(auth.require_auth)):
     role = db.get_all_roles()
     user_role = next((r for r in role if r["id"] == user["role_id"]), None)
     addresses = db.get_user_addresses(user["id"])
-    return render("profile.html", request, {"user_role": user_role, "addresses": addresses})
+    notif_prefs = db.get_notification_prefs(user["id"])
+    return render("profile.html", request, {"user_role": user_role, "addresses": addresses, "notif_prefs": notif_prefs})
 
 @app.post("/profile")
 async def update_profile(request: Request,
@@ -298,7 +301,6 @@ async def inbound_webhook(request: Request):
     if mail_to:
         recipient_user = db.get_user_by_address(mail_to)
         if recipient_user:
-            mail_id_row = db.get_conn()
             import sqlite3
             conn_tmp = db.get_conn()
             cur = conn_tmp.execute(
@@ -309,6 +311,28 @@ async def inbound_webhook(request: Request):
             new_mail_id = cur.lastrowid
             conn_tmp.close()
             db.apply_mail_rules(recipient_user["id"], new_mail_id, mail_from, subject)
+            # Notif email si activé
+            notif_prefs = db.get_notification_prefs(recipient_user["id"])
+            if notif_prefs.get("notify_new_mail") and recipient_user.get("email"):
+                site_name = db.get_setting("site_name", "Awlor")
+                mail_domain = db.get_setting("mail_domain", "awlor.online")
+                notif_body = (
+                    f"Bonjour {recipient_user['display_name']},\n\n"
+                    f"Vous avez re\u00e7u un nouveau mail de {mail_from} :\n"
+                    f"Objet : {subject}\n\n"
+                    f"Connectez-vous sur https://awlor.online/inbox pour le lire.\n\n"
+                    f"L'\u00e9quipe {site_name}"
+                )
+                try:
+                    email_client.send_mail(
+                        user=None,
+                        to=recipient_user["email"],
+                        subject=f"[{site_name}] Nouveau mail de {mail_from}",
+                        body=notif_body,
+                        from_address=f"noreply@{mail_domain}"
+                    )
+                except Exception:
+                    pass
         else:
             db.save_inbound_mail(mail_to=mail_to, mail_from=mail_from, subject=subject,
                                  body_html=body_html, body_text=body_text, headers=headers)
@@ -323,7 +347,6 @@ async def track_pixel(mail_id: int, request: Request):
     ip = auth.get_client_ip(request)
     ua = request.headers.get("user-agent", "")
     db.record_read_receipt(mail_id, ip=ip, user_agent=ua)
-    # 1x1 transparent PNG
     pixel = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
     return Response(content=pixel, media_type="image/png")
 
@@ -510,7 +533,7 @@ async def api_run_test(request: Request, user=Depends(auth.require_perm("can_run
     try:
         if test_name == "db_read":
             count = db.get_conn().execute("SELECT COUNT(*) FROM users").fetchone()[0]
-            result = {"success": True, "message": f"DB OK — {count} utilisateur(s) trouvé(s)"}
+            result = {"success": True, "message": f"DB OK \u2014 {count} utilisateur(s) trouv\u00e9(s)"}
 
         elif test_name == "db_write":
             conn = db.get_conn()
@@ -527,9 +550,9 @@ async def api_run_test(request: Request, user=Depends(auth.require_perm("can_run
                 token = db.create_session(test_user["id"])
                 check = db.get_session_user(token)
                 db.delete_session(token)
-                result = {"success": bool(check), "message": f"Session créée et validée pour {test_user['username']}"}
+                result = {"success": bool(check), "message": f"Session cr\u00e9\u00e9e et valid\u00e9e pour {test_user['username']}"}
             else:
-                result = {"success": False, "message": "Aucun super admin trouvé"}
+                result = {"success": False, "message": "Aucun super admin trouv\u00e9"}
 
         elif test_name == "smtp":
             smtp_pass = db.get_setting("global_smtp_password", "")
@@ -539,7 +562,7 @@ async def api_run_test(request: Request, user=Depends(auth.require_perm("can_run
         elif test_name == "webhook":
             webhook_url = db.get_setting("webhook_url", "")
             if not webhook_url:
-                result = {"success": False, "message": "Aucune URL webhook configurée"}
+                result = {"success": False, "message": "Aucune URL webhook configur\u00e9e"}
             else:
                 try:
                     async with httpx.AsyncClient(timeout=5) as client:
@@ -556,7 +579,7 @@ async def api_run_test(request: Request, user=Depends(auth.require_perm("can_run
                 u = db.get_user_by_username(test_username)
                 if u:
                     db.delete_user(u["id"])
-                result = {"success": ok, "message": f"Utilisateur '{test_username}' créé puis supprimé"}
+                result = {"success": ok, "message": f"Utilisateur '{test_username}' cr\u00e9\u00e9 puis supprim\u00e9"}
             else:
                 result = {"success": False, "message": err}
 
@@ -571,23 +594,23 @@ async def api_run_test(request: Request, user=Depends(auth.require_perm("can_run
         elif test_name == "internal_send":
             addresses = db.get_all_addresses_for_user(user["id"])
             if not addresses:
-                result = {"success": False, "message": "Aucune adresse configurée"}
+                result = {"success": False, "message": "Aucune adresse configur\u00e9e"}
             else:
                 addr = addresses[0]
                 db.save_inbound_mail(
                     mail_to=addr.lower(),
                     mail_from=addr.lower(),
                     subject="[TEST] Envoi interne automatique",
-                    body_html="<p>Test d'envoi interne réussi.</p>",
-                    body_text="Test d'envoi interne réussi.",
+                    body_html="<p>Test d'envoi interne r\u00e9ussi.</p>",
+                    body_text="Test d'envoi interne r\u00e9ussi.",
                     folder="INBOX"
                 )
-                result = {"success": True, "message": f"Mail de test envoyé à {addr}"}
+                result = {"success": True, "message": f"Mail de test envoy\u00e9 \u00e0 {addr}"}
 
         elif test_name == "groq_ai":
             groq_key = db.get_setting("groq_api_key", "")
             if not groq_key:
-                result = {"success": False, "message": "Clé Groq API non configurée"}
+                result = {"success": False, "message": "Cl\u00e9 Groq API non configur\u00e9e"}
             else:
                 try:
                     async with httpx.AsyncClient(timeout=10) as client:
@@ -595,12 +618,12 @@ async def api_run_test(request: Request, user=Depends(auth.require_perm("can_run
                             "https://api.groq.com/openai/v1/chat/completions",
                             headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
                             json={"model": db.get_setting("groq_model", "llama-3.3-70b-versatile"),
-                                  "messages": [{"role": "user", "content": "Réponds juste 'OK' en un mot."}],
+                                  "messages": [{"role": "user", "content": "R\u00e9ponds juste 'OK' en un mot."}],
                                   "max_tokens": 5}
                         )
                         if r.status_code == 200:
                             reply = r.json()["choices"][0]["message"]["content"].strip()
-                            result = {"success": True, "message": f"Groq répond: '{reply}'"}
+                            result = {"success": True, "message": f"Groq r\u00e9pond: '{reply}'"}
                         else:
                             result = {"success": False, "message": f"Groq HTTP {r.status_code}: {r.text[:100]}"}
                 except Exception as e:
@@ -620,9 +643,9 @@ async def api_run_test(request: Request, user=Depends(auth.require_perm("can_run
                     from datetime import datetime, timedelta
                     snooze_dt = (datetime.utcnow() + timedelta(seconds=5)).isoformat()
                     db.snooze_mail(test_user_obj["id"], mail_row["id"], snooze_dt)
-                    result = {"success": True, "message": f"Mail #{mail_row['id']} snoozé jusqu'à +5s"}
+                    result = {"success": True, "message": f"Mail #{mail_row['id']} snooz\u00e9 jusqu'\u00e0 +5s"}
                 else:
-                    result = {"success": False, "message": "Impossible de créer le mail de test"}
+                    result = {"success": False, "message": "Impossible de cr\u00e9er le mail de test"}
 
         elif test_name == "rules":
             rule_id = db.create_mail_rule(
@@ -630,7 +653,7 @@ async def api_run_test(request: Request, user=Depends(auth.require_perm("can_run
                 "mark_read", "", 999
             )
             db.delete_mail_rule(rule_id, user["id"])
-            result = {"success": True, "message": f"Règle créée (id={rule_id}) puis supprimée"}
+            result = {"success": True, "message": f"R\u00e8gle cr\u00e9\u00e9e (id={rule_id}) puis supprim\u00e9e"}
 
         elif test_name == "followup":
             addresses = db.get_all_addresses_for_user(user["id"])
@@ -644,7 +667,7 @@ async def api_run_test(request: Request, user=Depends(auth.require_perm("can_run
                 if mail_row:
                     db.set_followup(user["id"], mail_row["id"], days=0)
                     alerts = db.get_followup_alerts(user["id"], addresses)
-                    result = {"success": True, "message": f"Follow-up OK — {len(alerts)} alerte(s) détectée(s)"}
+                    result = {"success": True, "message": f"Follow-up OK \u2014 {len(alerts)} alerte(s) d\u00e9tect\u00e9e(s)"}
                 else:
                     result = {"success": False, "message": "Mail test introuvable"}
 
@@ -679,7 +702,7 @@ async def api_mail(uid: int, user=Depends(auth.require_auth)):
         raise HTTPException(404, detail=mail["error"])
     user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
     if mail.get("to", "").lower() not in user_addrs and mail.get("from", "").lower() not in user_addrs:
-        raise HTTPException(403, detail="Accès refusé")
+        raise HTTPException(403, detail="Acc\u00e8s refus\u00e9")
     return mail
 
 @app.post("/api/send")
@@ -700,13 +723,12 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
     if from_address:
         user_addrs = db.get_all_addresses_for_user(user["id"])
         if from_address.lower() not in [a.lower() for a in user_addrs]:
-            raise HTTPException(403, detail="Adresse expéditrice non autorisée")
+            raise HTTPException(403, detail="Adresse exp\u00e9ditrice non autoris\u00e9e")
 
     sent_from = from_address or db.get_primary_address(user["id"]) or f"noreply@{db.get_setting('mail_domain', 'awlor.online')}"
     body_html = body if is_html else ""
     body_text = "" if is_html else body
 
-    # Envoi programmé
     if scheduled_at:
         mail_id = db.save_scheduled_mail(user["id"], sent_from, to, subject, body_html, body_text, scheduled_at)
         return JSONResponse({"success": True, "scheduled": True, "id": mail_id})
@@ -716,34 +738,22 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
 
     if is_internal:
         db.save_inbound_mail(
-            mail_to=to_lower,
-            mail_from=sent_from,
-            subject=subject,
-            body_html=body_html,
-            body_text=body_text,
-            headers=json.dumps({"from": sent_from, "to": to}),
-            folder="INBOX"
+            mail_to=to_lower, mail_from=sent_from, subject=subject,
+            body_html=body_html, body_text=body_text,
+            headers=json.dumps({"from": sent_from, "to": to}), folder="INBOX"
         )
         ok, err = True, None
     else:
         ok, err = email_client.send_mail(
-            user=user,
-            to=to,
-            subject=subject,
-            body=body,
-            html=is_html,
-            from_address=sent_from
+            user=user, to=to, subject=subject, body=body,
+            html=is_html, from_address=sent_from
         )
 
     if ok:
         db.save_inbound_mail(
-            mail_to=to_lower,
-            mail_from=sent_from,
-            subject=subject,
-            body_html=body_html,
-            body_text=body_text,
-            headers=json.dumps({"from": sent_from, "to": to}),
-            folder="Sent"
+            mail_to=to_lower, mail_from=sent_from, subject=subject,
+            body_html=body_html, body_text=body_text,
+            headers=json.dumps({"from": sent_from, "to": to}), folder="Sent"
         )
         db.add_audit_log(user["id"], user["username"], "SEND_MAIL", target=to)
 
@@ -797,7 +807,7 @@ async def api_bulk(request: Request, user=Depends(auth.require_auth)):
     mail_ids = [int(i) for i in data.get("ids", [])]
     action = data.get("action", "")
     if not mail_ids or not action:
-        return JSONResponse({"success": False, "error": "Paramètres manquants"})
+        return JSONResponse({"success": False, "error": "Param\u00e8tres manquants"})
     addresses = db.get_all_addresses_for_user(user["id"])
     db.bulk_action_mails(mail_ids, action, addresses)
     return JSONResponse({"success": True, "count": len(mail_ids)})
@@ -852,8 +862,7 @@ async def api_stats(user=Depends(auth.require_auth)):
     followup_alerts = db.get_followup_alerts(user["id"], addresses)
     db.process_snooze_wakeups()
     return {
-        "unseen": unseen,
-        "unread": unseen,
+        "unseen": unseen, "unread": unseen,
         "heatmap": heatmap,
         "followup_count": len(followup_alerts),
         "followup_alerts": followup_alerts[:5],
@@ -914,7 +923,7 @@ async def api_create_rule(request: Request, user=Depends(auth.require_auth)):
     data = await request.json()
     rule_id = db.create_mail_rule(
         user_id=user["id"],
-        name=data.get("name", "Nouvelle règle"),
+        name=data.get("name", "Nouvelle r\u00e8gle"),
         condition_field=data.get("condition_field", "from"),
         condition_operator=data.get("condition_operator", "contains"),
         condition_value=data.get("condition_value", ""),
@@ -993,52 +1002,40 @@ async def api_read_receipts(uid: int, user=Depends(auth.require_auth)):
 async def api_ai_chat(request: Request, user=Depends(auth.require_auth)):
     ai_enabled = db.get_setting("ai_enabled", "1")
     if ai_enabled != "1":
-        return JSONResponse({"success": False, "error": "IA désactivée"})
-
+        return JSONResponse({"success": False, "error": "IA d\u00e9sactiv\u00e9e"})
     groq_key = db.get_setting("groq_api_key", "")
     if not groq_key:
-        return JSONResponse({"success": False, "error": "Clé Groq non configurée. Ajoutez GROQ_API_KEY dans les paramètres admin."})
-
+        return JSONResponse({"success": False, "error": "Cl\u00e9 Groq non configur\u00e9e."})
     groq_model = db.get_setting("groq_model", "llama-3.3-70b-versatile")
     data = await request.json()
     user_message = data.get("message", "").strip()
     mail_context = data.get("mail_context", None)
     action = data.get("action", "chat")
-
-    if not user_message and not action:
-        return JSONResponse({"success": False, "error": "Message vide"})
-
     history = db.get_ai_history(user["id"], limit=10)
     addresses = db.get_all_addresses_for_user(user["id"])
     primary_addr = db.get_primary_address(user["id"])
-
-    system_prompt = f"""Tu es Awlor AI, l'assistant intelligent intégré à la boîte mail Awlor.
-Tu as accès à la boîte mail de {user['display_name']} ({primary_addr}).
-Tu peux : résumer des mails, rédiger des réponses, détecter du spam, traduire, trier, analyser des conversations.
-Réponds toujours en français sauf si l'utilisateur écrit dans une autre langue.
-Sois concis, professionnel et utile. Quand tu génères un mail, formate-le clairement avec Objet: et Corps:.
+    system_prompt = f"""Tu es Awlor AI, l'assistant intelligent int\u00e9gr\u00e9 \u00e0 la bo\u00eete mail Awlor.
+Tu as acc\u00e8s \u00e0 la bo\u00eete mail de {user['display_name']} ({primary_addr}).
+Tu peux : r\u00e9sumer des mails, r\u00e9diger des r\u00e9ponses, d\u00e9tecter du spam, traduire, trier, analyser des conversations.
+R\u00e9ponds toujours en fran\u00e7ais sauf si l'utilisateur \u00e9crit dans une autre langue.
+Sois concis, professionnel et utile. Quand tu g\u00e9n\u00e8res un mail, formate-le clairement avec Objet: et Corps:.
 Adresses de l'utilisateur : {', '.join(addresses) if addresses else 'aucune'}"""
-
     if mail_context:
         system_prompt += f"\n\nCONTEXTE MAIL ACTUEL:\nDe: {mail_context.get('from','')}\nObjet: {mail_context.get('subject','')}\nContenu: {mail_context.get('body','')[:2000]}"
-
     messages = [{"role": "system", "content": system_prompt}]
     for h in history[-8:]:
         messages.append({"role": h["role"], "content": h["content"]})
-
     if action == "summarize" and mail_context:
-        user_message = f"Fais un résumé concis de ce mail en 3-4 phrases maximum."
+        user_message = "Fais un r\u00e9sum\u00e9 concis de ce mail en 3-4 phrases maximum."
     elif action == "reply" and mail_context:
-        user_message = f"Rédige une réponse professionnelle et courtoise à ce mail."
+        user_message = "R\u00e9dige une r\u00e9ponse professionnelle et courtoise \u00e0 ce mail."
     elif action == "spam" and mail_context:
-        user_message = f"Analyse ce mail et dis-moi s'il s'agit de spam ou d'un mail légitime. Justifie ta réponse."
+        user_message = "Analyse ce mail et dis-moi s'il s'agit de spam ou d'un mail l\u00e9gitime. Justifie ta r\u00e9ponse."
     elif action == "translate" and mail_context:
-        user_message = f"Traduis ce mail en français de manière naturelle."
+        user_message = "Traduis ce mail en fran\u00e7ais de mani\u00e8re naturelle."
     elif action == "compose":
-        user_message = data.get("message", "Rédige un mail professionnel.")
-
+        user_message = data.get("message", "R\u00e9dige un mail professionnel.")
     messages.append({"role": "user", "content": user_message})
-
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(
@@ -1047,23 +1044,15 @@ Adresses de l'utilisateur : {', '.join(addresses) if addresses else 'aucune'}"""
                 json={"model": groq_model, "messages": messages, "max_tokens": 1024, "temperature": 0.7}
             )
             if r.status_code != 200:
-                return JSONResponse({"success": False, "error": f"Groq API error {r.status_code}: {r.text[:200]}"})
-
+                return JSONResponse({"success": False, "error": f"Groq API error {r.status_code}"})
             response_data = r.json()
             ai_reply = response_data["choices"][0]["message"]["content"]
-
             db.save_ai_message(user["id"], "user", user_message)
             db.save_ai_message(user["id"], "assistant", ai_reply)
-
-            return JSONResponse({
-                "success": True,
-                "reply": ai_reply,
-                "model": groq_model,
-                "tokens": response_data.get("usage", {})
-            })
-
+            return JSONResponse({"success": True, "reply": ai_reply, "model": groq_model,
+                                 "tokens": response_data.get("usage", {})})
     except httpx.TimeoutException:
-        return JSONResponse({"success": False, "error": "Timeout — Groq ne répond pas"})
+        return JSONResponse({"success": False, "error": "Timeout \u2014 Groq ne r\u00e9pond pas"})
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)})
 
@@ -1078,7 +1067,7 @@ async def api_ai_clear(user=Depends(auth.require_auth)):
     return JSONResponse({"success": True})
 
 # ============================================================
-# API MODÉRATION
+# API MOD\u00c9RATION
 # ============================================================
 
 @app.get("/api/moderation/mails")
@@ -1100,6 +1089,130 @@ async def api_moderation_mail(uid: int, user=Depends(auth.require_perm("can_view
 async def api_moderation_delete(uid: int, user=Depends(auth.require_perm("can_view_all_mails"))):
     ok = db.delete_inbound_mail(uid)
     return JSONResponse({"success": ok})
+
+# ============================================================
+# PARTIE 7 \u2014 EXPORT MAILS (CSV + EML)
+# ============================================================
+
+@app.get("/api/export/csv")
+async def api_export_csv(folder: str = "INBOX", user=Depends(auth.require_auth)):
+    """T\u00e9l\u00e9charge tous les mails d'un dossier au format CSV."""
+    import csv
+    import io
+    addresses = db.get_all_addresses_for_user(user["id"])
+    mails = db.get_all_mails_for_export(addresses, folder=folder)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["id", "date", "from", "to", "subject", "folder", "seen", "starred"])
+    writer.writeheader()
+    for m in mails:
+        writer.writerow({
+            "id": m.get("id", ""),
+            "date": m.get("created_at", ""),
+            "from": m.get("mail_from", ""),
+            "to": m.get("mail_to", ""),
+            "subject": m.get("subject", ""),
+            "folder": m.get("folder", ""),
+            "seen": m.get("seen", 0),
+            "starred": m.get("starred", 0),
+        })
+    output.seek(0)
+    db.add_audit_log(user["id"], user["username"], "EXPORT_CSV", details=f"folder={folder}")
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="awlor_export_{folder}.csv"'}
+    )
+
+@app.get("/api/export/eml/{uid}")
+async def api_export_eml(uid: int, user=Depends(auth.require_auth)):
+    """T\u00e9l\u00e9charge un mail unique au format .eml."""
+    mail = db.get_inbound_mail_by_id(uid)
+    if not mail:
+        raise HTTPException(404)
+    user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
+    if mail.get("mail_to", "").lower() not in user_addrs and mail.get("mail_from", "").lower() not in user_addrs:
+        raise HTTPException(403)
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = mail.get("subject", "")
+    msg["From"] = mail.get("mail_from", "")
+    msg["To"] = mail.get("mail_to", "")
+    msg["Date"] = mail.get("created_at", "")
+    msg["Message-ID"] = f"<{uid}@awlor.online>"
+    if mail.get("body_text"):
+        msg.attach(MIMEText(mail["body_text"], "plain", "utf-8"))
+    if mail.get("body_html"):
+        msg.attach(MIMEText(mail["body_html"], "html", "utf-8"))
+    eml_bytes = msg.as_bytes()
+    safe_subject = "".join(c for c in (mail.get("subject", "mail") or "mail") if c.isalnum() or c in "-_ ")[:40].strip()
+    db.add_audit_log(user["id"], user["username"], "EXPORT_EML", target=str(uid))
+    return Response(
+        content=eml_bytes,
+        media_type="message/rfc822",
+        headers={"Content-Disposition": f'attachment; filename="{safe_subject}.eml"'}
+    )
+
+@app.get("/api/export/zip")
+async def api_export_zip(folder: str = "INBOX", user=Depends(auth.require_auth)):
+    """T\u00e9l\u00e9charge tous les mails d'un dossier en ZIP de fichiers .eml."""
+    import io
+    import zipfile
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    addresses = db.get_all_addresses_for_user(user["id"])
+    mails = db.get_all_mails_for_export(addresses, folder=folder)
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for m in mails:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = m.get("subject", "")
+            msg["From"] = m.get("mail_from", "")
+            msg["To"] = m.get("mail_to", "")
+            msg["Date"] = m.get("created_at", "")
+            msg["Message-ID"] = f"<{m['id']}@awlor.online>"
+            if m.get("body_text"):
+                msg.attach(MIMEText(m["body_text"], "plain", "utf-8"))
+            if m.get("body_html"):
+                msg.attach(MIMEText(m["body_html"], "html", "utf-8"))
+            safe = "".join(c for c in (m.get("subject", "") or "") if c.isalnum() or c in "-_ ")[:40].strip() or str(m["id"])
+            zf.writestr(f"{m['id']}_{safe}.eml", msg.as_bytes())
+    zip_buffer.seek(0)
+    db.add_audit_log(user["id"], user["username"], "EXPORT_ZIP", details=f"folder={folder}")
+    return StreamingResponse(
+        iter([zip_buffer.read()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="awlor_export_{folder}.zip"'}
+    )
+
+# ============================================================
+# PARTIE 7 \u2014 NOTIFICATIONS & DIGEST
+# ============================================================
+
+@app.get("/api/notifications/prefs")
+async def api_get_notif_prefs(user=Depends(auth.require_auth)):
+    prefs = db.get_notification_prefs(user["id"])
+    return JSONResponse({"prefs": prefs})
+
+@app.post("/api/notifications/prefs")
+async def api_save_notif_prefs(request: Request, user=Depends(auth.require_auth)):
+    data = await request.json()
+    db.save_notification_prefs(user["id"], data)
+    return JSONResponse({"success": True})
+
+@app.post("/api/digest/send")
+async def api_send_digest(request: Request, user=Depends(auth.require_perm("can_change_settings"))):
+    """Admin: force l'envoi du rapport hebdomadaire pour tous les utilisateurs."""
+    from scheduler import _run_weekly_digest
+    _run_weekly_digest()
+    return JSONResponse({"success": True, "message": "Digest hebdomadaire envoy\u00e9"})
+
+@app.post("/api/digest/preview")
+async def api_preview_digest(user=Depends(auth.require_auth)):
+    """Pr\u00e9visualise le digest de l'utilisateur courant."""
+    addresses = db.get_all_addresses_for_user(user["id"])
+    stats = db.get_weekly_stats(user["id"], addresses)
+    return JSONResponse({"success": True, "stats": stats})
 
 # ============================================================
 # ENTRYPOINT
