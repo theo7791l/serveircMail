@@ -13,13 +13,27 @@ import auth
 import email_client
 import scheduler
 from config import settings
+from middleware import SecurityHeadersMiddleware, RateLimitMiddleware, verify_webhook_signature
 
 db.init_db()
 scheduler.start_scheduler()
 
 app = FastAPI(title="Awlor", docs_url=None, redoc_url=None)
+
+# ============================================================
+# MIDDLEWARES DE SÉCURITÉ
+# ============================================================
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
+# Tailles max des champs pour éviter les payloads abusifs
+MAX_SUBJECT_LEN = 500
+MAX_BODY_LEN    = 500_000  # 500 Ko
+MAX_NAME_LEN    = 100
+MAX_USERNAME_LEN = 50
 
 def render(template, request, ctx={}):
     session = request.cookies.get("session")
@@ -53,10 +67,13 @@ async def login_page(request: Request):
 
 @app.post("/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    # Validation taille
+    if len(username) > MAX_USERNAME_LEN or len(password) > 200:
+        return RedirectResponse("/login?error=invalid", status_code=302)
     ip = auth.get_client_ip(request)
     user = db.get_user_by_username(username)
     if not user or not db.verify_password(password, user["password_hash"]):
-        db.add_audit_log(None, username, "LOGIN_FAILED", ip=ip)
+        db.add_audit_log(None, username[:50], "LOGIN_FAILED", ip=ip)
         return RedirectResponse("/login?error=invalid", status_code=302)
     if user["is_banned"]:
         return RedirectResponse("/login?error=banned", status_code=302)
@@ -85,6 +102,11 @@ async def register(request: Request,
     email: str = Form(...),
     password: str = Form(...),
     mail_prefix: str = Form(...)):
+
+    # Validation taille des inputs
+    if (len(username) > MAX_USERNAME_LEN or len(display_name) > MAX_NAME_LEN
+            or len(email) > 254 or len(password) > 200 or len(mail_prefix) > 64):
+        return RedirectResponse("/register?error=invalid", status_code=302)
 
     if db.get_setting("allow_registration", "1") != "1":
         return RedirectResponse("/register?error=registration_closed", status_code=302)
@@ -134,6 +156,9 @@ async def verify_page(request: Request, email: str = ""):
 
 @app.post("/verify")
 async def verify(request: Request, email: str = Form(...), code: str = Form(...)):
+    # Validation taille
+    if len(email) > 254 or len(code) > 20:
+        return render("verify.html", request, {"email": email, "error": "Code invalide"})
     ok, result = db.confirm_pending_user(email, code.strip())
     if not ok:
         return render("verify.html", request, {"email": email, "error": result})
@@ -156,7 +181,7 @@ async def logout(request: Request):
     return resp
 
 # ============================================================
-# PAGES L\u00c9GALES & SEO
+# PAGES LÉGALES & SEO
 # ============================================================
 
 @app.get("/privacy", response_class=HTMLResponse)
@@ -245,6 +270,11 @@ async def update_profile(request: Request,
     display_name: str = Form(...),
     new_password: str = Form(default=""),
     user=Depends(auth.require_auth)):
+    # Validation taille
+    if len(display_name) > MAX_NAME_LEN:
+        return RedirectResponse("/profile?error=invalid", status_code=302)
+    if new_password and len(new_password) > 200:
+        return RedirectResponse("/profile?error=invalid", status_code=302)
     updates = {"display_name": display_name}
     if new_password:
         updates["password"] = new_password
@@ -282,8 +312,15 @@ async def ai_page(request: Request, user=Depends(auth.require_auth)):
 
 @app.post("/webhook/inbound")
 async def inbound_webhook(request: Request):
+    # Vérification signature HMAC Resend
+    raw_body = await request.body()
+    webhook_secret = db.get_setting("webhook_secret", "")
+    signature = request.headers.get("Resend-Signature", "")
+    if webhook_secret and not verify_webhook_signature(raw_body, signature, webhook_secret):
+        raise HTTPException(status_code=403, detail="Signature webhook invalide")
+
     try:
-        payload = await request.json()
+        payload = json.loads(raw_body)
     except Exception:
         raise HTTPException(400, detail="Payload JSON invalide")
 
@@ -293,9 +330,9 @@ async def inbound_webhook(request: Request):
     from_data = payload.get("from", {})
     mail_from = from_data.get("email", "") if isinstance(from_data, dict) else str(from_data)
 
-    subject   = payload.get("subject", "")
-    body_html = payload.get("html", "")
-    body_text = payload.get("text", "")
+    subject   = payload.get("subject", "")[:MAX_SUBJECT_LEN]
+    body_html = payload.get("html", "")[:MAX_BODY_LEN]
+    body_text = payload.get("text", "")[:MAX_BODY_LEN]
     headers   = json.dumps(payload.get("headers", {}))
 
     if mail_to:
@@ -711,8 +748,8 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
         raise HTTPException(403)
     data = await request.json()
     to = (data.get("to") or "").strip()
-    subject = (data.get("subject") or "").strip()
-    body = (data.get("body") or "").strip()
+    subject = (data.get("subject") or "").strip()[:MAX_SUBJECT_LEN]
+    body = (data.get("body") or "").strip()[:MAX_BODY_LEN]
     from_address = (data.get("from_address") or "").strip()
     is_html = data.get("html", False)
     scheduled_at = data.get("scheduled_at", "")
@@ -808,6 +845,9 @@ async def api_bulk(request: Request, user=Depends(auth.require_auth)):
     action = data.get("action", "")
     if not mail_ids or not action:
         return JSONResponse({"success": False, "error": "Param\u00e8tres manquants"})
+    # Limite le nombre d'IDs par requête bulk pour éviter les abus
+    if len(mail_ids) > 200:
+        raise HTTPException(400, detail="Trop d'IDs dans une seule requête (max 200)")
     addresses = db.get_all_addresses_for_user(user["id"])
     db.bulk_action_mails(mail_ids, action, addresses)
     return JSONResponse({"success": True, "count": len(mail_ids)})
@@ -847,6 +887,14 @@ async def api_followup_alerts(user=Depends(auth.require_auth)):
 
 @app.post("/api/followup/{fid}/dismiss")
 async def api_followup_dismiss(fid: int, user=Depends(auth.require_auth)):
+    # Fix IDOR : vérifie que le follow-up appartient bien à l'utilisateur courant
+    conn = db.get_conn()
+    row = conn.execute("SELECT user_id FROM followup_tracker WHERE id=?", (fid,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(404)
+    if row["user_id"] != user["id"]:
+        raise HTTPException(403, detail="Acc\u00e8s refus\u00e9")
     db.dismiss_followup(fid)
     return JSONResponse({"success": True})
 
@@ -897,8 +945,8 @@ async def api_save_draft(request: Request, user=Depends(auth.require_auth)):
         user_id=user["id"],
         mail_from=data.get("from_address", ""),
         mail_to=data.get("to", ""),
-        subject=data.get("subject", ""),
-        body_html=data.get("body", ""),
+        subject=data.get("subject", "")[:MAX_SUBJECT_LEN],
+        body_html=data.get("body", "")[:MAX_BODY_LEN],
         body_text="",
         draft_id=data.get("draft_id")
     )
@@ -923,12 +971,12 @@ async def api_create_rule(request: Request, user=Depends(auth.require_auth)):
     data = await request.json()
     rule_id = db.create_mail_rule(
         user_id=user["id"],
-        name=data.get("name", "Nouvelle r\u00e8gle"),
+        name=data.get("name", "Nouvelle r\u00e8gle")[:100],
         condition_field=data.get("condition_field", "from"),
         condition_operator=data.get("condition_operator", "contains"),
-        condition_value=data.get("condition_value", ""),
+        condition_value=data.get("condition_value", "")[:200],
         action_type=data.get("action_type", "move_to_folder"),
-        action_value=data.get("action_value", ""),
+        action_value=data.get("action_value", "")[:100],
         priority=data.get("priority", 0)
     )
     return JSONResponse({"success": True, "id": rule_id})
@@ -952,10 +1000,10 @@ async def api_create_template(request: Request, user=Depends(auth.require_auth))
     data = await request.json()
     tpl_id = db.create_reply_template(
         user_id=user["id"],
-        name=data.get("name", "Nouveau template"),
-        subject=data.get("subject", ""),
-        body_html=data.get("body_html", ""),
-        shortcut=data.get("shortcut", "")
+        name=data.get("name", "Nouveau template")[:100],
+        subject=data.get("subject", "")[:MAX_SUBJECT_LEN],
+        body_html=data.get("body_html", "")[:MAX_BODY_LEN],
+        shortcut=data.get("shortcut", "")[:20]
     )
     return JSONResponse({"success": True, "id": tpl_id})
 
@@ -1008,7 +1056,7 @@ async def api_ai_chat(request: Request, user=Depends(auth.require_auth)):
         return JSONResponse({"success": False, "error": "Cl\u00e9 Groq non configur\u00e9e."})
     groq_model = db.get_setting("groq_model", "llama-3.3-70b-versatile")
     data = await request.json()
-    user_message = data.get("message", "").strip()
+    user_message = data.get("message", "").strip()[:2000]  # Limite le prompt utilisateur
     mail_context = data.get("mail_context", None)
     action = data.get("action", "chat")
     history = db.get_ai_history(user["id"], limit=10)
@@ -1034,7 +1082,7 @@ Adresses de l'utilisateur : {', '.join(addresses) if addresses else 'aucune'}"""
     elif action == "translate" and mail_context:
         user_message = "Traduis ce mail en fran\u00e7ais de mani\u00e8re naturelle."
     elif action == "compose":
-        user_message = data.get("message", "R\u00e9dige un mail professionnel.")
+        user_message = data.get("message", "R\u00e9dige un mail professionnel.")[:2000]
     messages.append({"role": "user", "content": user_message})
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -1067,7 +1115,7 @@ async def api_ai_clear(user=Depends(auth.require_auth)):
     return JSONResponse({"success": True})
 
 # ============================================================
-# API MOD\u00c9RATION
+# API MODÉRATION
 # ============================================================
 
 @app.get("/api/moderation/mails")
@@ -1091,12 +1139,11 @@ async def api_moderation_delete(uid: int, user=Depends(auth.require_perm("can_vi
     return JSONResponse({"success": ok})
 
 # ============================================================
-# PARTIE 7 \u2014 EXPORT MAILS (CSV + EML)
+# PARTIE 7 — EXPORT MAILS (CSV + EML)
 # ============================================================
 
 @app.get("/api/export/csv")
 async def api_export_csv(folder: str = "INBOX", user=Depends(auth.require_auth)):
-    """T\u00e9l\u00e9charge tous les mails d'un dossier au format CSV."""
     import csv
     import io
     addresses = db.get_all_addresses_for_user(user["id"])
@@ -1125,7 +1172,6 @@ async def api_export_csv(folder: str = "INBOX", user=Depends(auth.require_auth))
 
 @app.get("/api/export/eml/{uid}")
 async def api_export_eml(uid: int, user=Depends(auth.require_auth)):
-    """T\u00e9l\u00e9charge un mail unique au format .eml."""
     mail = db.get_inbound_mail_by_id(uid)
     if not mail:
         raise HTTPException(404)
@@ -1155,7 +1201,6 @@ async def api_export_eml(uid: int, user=Depends(auth.require_auth)):
 
 @app.get("/api/export/zip")
 async def api_export_zip(folder: str = "INBOX", user=Depends(auth.require_auth)):
-    """T\u00e9l\u00e9charge tous les mails d'un dossier en ZIP de fichiers .eml."""
     import io
     import zipfile
     from email.mime.multipart import MIMEMultipart
@@ -1186,7 +1231,7 @@ async def api_export_zip(folder: str = "INBOX", user=Depends(auth.require_auth))
     )
 
 # ============================================================
-# PARTIE 7 \u2014 NOTIFICATIONS & DIGEST
+# PARTIE 7 — NOTIFICATIONS & DIGEST
 # ============================================================
 
 @app.get("/api/notifications/prefs")
@@ -1202,14 +1247,12 @@ async def api_save_notif_prefs(request: Request, user=Depends(auth.require_auth)
 
 @app.post("/api/digest/send")
 async def api_send_digest(request: Request, user=Depends(auth.require_perm("can_change_settings"))):
-    """Admin: force l'envoi du rapport hebdomadaire pour tous les utilisateurs."""
     from scheduler import _run_weekly_digest
     _run_weekly_digest()
     return JSONResponse({"success": True, "message": "Digest hebdomadaire envoy\u00e9"})
 
 @app.post("/api/digest/preview")
 async def api_preview_digest(user=Depends(auth.require_auth)):
-    """Pr\u00e9visualise le digest de l'utilisateur courant."""
     addresses = db.get_all_addresses_for_user(user["id"])
     stats = db.get_weekly_stats(user["id"], addresses)
     return JSONResponse({"success": True, "stats": stats})
