@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Request, Form, HTTPException, Depends, Cookie
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import Optional
 import uvicorn
 import os
 import json
+import time
+import httpx
 import database as db
 import auth
 import email_client
@@ -199,22 +201,34 @@ async def sitemap_xml():
 @app.get("/inbox", response_class=HTMLResponse)
 async def inbox(request: Request, user=Depends(auth.require_auth), page: int = 1, folder: str = "INBOX", address: str = ""):
     addresses = db.get_user_addresses(user["id"])
-    return render("inbox.html", request, {"folder": folder, "page": page, "addresses": addresses, "current_address": address})
+    ai_enabled = db.get_setting("ai_enabled", "1")
+    return render("inbox.html", request, {"folder": folder, "page": page, "addresses": addresses, "current_address": address, "ai_enabled": ai_enabled})
 
 @app.get("/compose", response_class=HTMLResponse)
-async def compose(request: Request, user=Depends(auth.require_auth), reply_to: str = "", subject: str = ""):
+async def compose(request: Request, user=Depends(auth.require_auth), reply_to: str = "", subject: str = "", draft_id: str = ""):
     addresses = db.get_user_addresses(user["id"])
     primary = db.get_primary_address(user["id"])
+    templates_list = db.get_reply_templates(user["id"])
+    draft = None
+    if draft_id:
+        try:
+            draft = db.get_draft_by_id(int(draft_id), user["id"])
+        except Exception:
+            pass
     return render("compose.html", request, {
         "reply_to": reply_to,
         "subject": subject,
         "addresses": addresses,
         "primary_address": primary,
+        "templates_list": templates_list,
+        "draft": draft,
+        "draft_id": draft_id,
     })
 
 @app.get("/mail/{uid}", response_class=HTMLResponse)
 async def read_mail(request: Request, uid: int, folder: str = "INBOX", user=Depends(auth.require_auth)):
-    return render("read.html", request, {"uid": uid, "folder": folder})
+    ai_enabled = db.get_setting("ai_enabled", "1")
+    return render("read.html", request, {"uid": uid, "folder": folder, "ai_enabled": ai_enabled})
 
 @app.get("/profile", response_class=HTMLResponse)
 async def profile(request: Request, user=Depends(auth.require_auth)):
@@ -234,6 +248,30 @@ async def update_profile(request: Request,
     db.update_user(user["id"], **updates)
     db.add_audit_log(user["id"], user["username"], "PROFILE_UPDATE")
     return RedirectResponse("/profile?success=1", status_code=302)
+
+# ============================================================
+# NOUVELLES PAGES
+# ============================================================
+
+@app.get("/rules", response_class=HTMLResponse)
+async def rules_page(request: Request, user=Depends(auth.require_auth)):
+    rules = db.get_all_mail_rules(user["id"])
+    return render("rules.html", request, {"rules": rules})
+
+@app.get("/templates", response_class=HTMLResponse)
+async def templates_page(request: Request, user=Depends(auth.require_auth)):
+    templates_list = db.get_reply_templates(user["id"])
+    return render("templates.html", request, {"templates_list": templates_list})
+
+@app.get("/timeline", response_class=HTMLResponse)
+async def timeline_page(request: Request, user=Depends(auth.require_auth), contact: str = ""):
+    return render("timeline.html", request, {"contact": contact})
+
+@app.get("/ai", response_class=HTMLResponse)
+async def ai_page(request: Request, user=Depends(auth.require_auth)):
+    ai_enabled = db.get_setting("ai_enabled", "1")
+    groq_key = db.get_setting("groq_api_key", "")
+    return render("ai.html", request, {"ai_enabled": ai_enabled, "groq_configured": bool(groq_key)})
 
 # ============================================================
 # RESEND INBOUND WEBHOOK
@@ -258,9 +296,36 @@ async def inbound_webhook(request: Request):
     headers   = json.dumps(payload.get("headers", {}))
 
     if mail_to:
-        db.save_inbound_mail(mail_to=mail_to, mail_from=mail_from, subject=subject,
-                             body_html=body_html, body_text=body_text, headers=headers)
+        recipient_user = db.get_user_by_address(mail_to)
+        if recipient_user:
+            mail_id_row = db.get_conn()
+            import sqlite3
+            conn_tmp = db.get_conn()
+            cur = conn_tmp.execute(
+                "INSERT INTO inbound_mails (mail_to, mail_from, subject, body_html, body_text, headers, folder) VALUES (?,?,?,?,?,?,?)",
+                (mail_to.lower(), mail_from.lower(), subject, body_html, body_text, headers, "INBOX")
+            )
+            conn_tmp.commit()
+            new_mail_id = cur.lastrowid
+            conn_tmp.close()
+            db.apply_mail_rules(recipient_user["id"], new_mail_id, mail_from, subject)
+        else:
+            db.save_inbound_mail(mail_to=mail_to, mail_from=mail_from, subject=subject,
+                                 body_html=body_html, body_text=body_text, headers=headers)
     return JSONResponse({"ok": True})
+
+# ============================================================
+# READ RECEIPT PIXEL
+# ============================================================
+
+@app.get("/track/{mail_id}.png")
+async def track_pixel(mail_id: int, request: Request):
+    ip = auth.get_client_ip(request)
+    ua = request.headers.get("user-agent", "")
+    db.record_read_receipt(mail_id, ip=ip, user_agent=ua)
+    # 1x1 transparent PNG
+    pixel = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82'
+    return Response(content=pixel, media_type="image/png")
 
 # ============================================================
 # MODERATION
@@ -420,8 +485,12 @@ async def admin_save_settings(request: Request, user=Depends(auth.require_perm("
     db.add_audit_log(user["id"], user["username"], "UPDATE_SETTINGS")
     return RedirectResponse("/admin/settings?success=1", status_code=302)
 
+@app.get("/admin/tests", response_class=HTMLResponse)
+async def admin_tests(request: Request, user=Depends(auth.require_perm("can_run_tests"))):
+    return render("admin/tests.html", request, {})
+
 # ============================================================
-# API ADMIN — test SMTP
+# API ADMIN TESTS
 # ============================================================
 
 @app.post("/api/admin/test-smtp-connection")
@@ -430,6 +499,160 @@ async def api_test_smtp(request: Request, user=Depends(auth.require_perm("can_ch
     smtp_pass = data.get("smtp_pass") or db.get_setting("global_smtp_password", "")
     ok, msg = email_client.test_smtp_connection(smtp_pass)
     return JSONResponse({"success": ok, "message": msg})
+
+@app.post("/api/admin/run-test")
+async def api_run_test(request: Request, user=Depends(auth.require_perm("can_run_tests"))):
+    data = await request.json()
+    test_name = data.get("test", "")
+    start = time.time()
+    result = {"success": False, "message": "Test inconnu", "duration_ms": 0}
+
+    try:
+        if test_name == "db_read":
+            count = db.get_conn().execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            result = {"success": True, "message": f"DB OK — {count} utilisateur(s) trouvé(s)"}
+
+        elif test_name == "db_write":
+            conn = db.get_conn()
+            conn.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('_test_write', '1')")
+            conn.commit()
+            conn.execute("DELETE FROM system_settings WHERE key='_test_write'")
+            conn.commit()
+            conn.close()
+            result = {"success": True, "message": "DB write/delete OK"}
+
+        elif test_name == "auth_session":
+            test_user = db.get_user_by_username(db.get_setting("super_admin_username", "admin"))
+            if test_user:
+                token = db.create_session(test_user["id"])
+                check = db.get_session_user(token)
+                db.delete_session(token)
+                result = {"success": bool(check), "message": f"Session créée et validée pour {test_user['username']}"}
+            else:
+                result = {"success": False, "message": "Aucun super admin trouvé"}
+
+        elif test_name == "smtp":
+            smtp_pass = db.get_setting("global_smtp_password", "")
+            ok, msg = email_client.test_smtp_connection(smtp_pass)
+            result = {"success": ok, "message": msg}
+
+        elif test_name == "webhook":
+            webhook_url = db.get_setting("webhook_url", "")
+            if not webhook_url:
+                result = {"success": False, "message": "Aucune URL webhook configurée"}
+            else:
+                try:
+                    async with httpx.AsyncClient(timeout=5) as client:
+                        r = await client.get(webhook_url.replace("/webhook/inbound", "/"))
+                        result = {"success": r.status_code < 500, "message": f"HTTP {r.status_code}"}
+                except Exception as e:
+                    result = {"success": False, "message": str(e)}
+
+        elif test_name == "create_delete_user":
+            import secrets as _s
+            test_username = f"_test_{_s.token_hex(4)}"
+            ok, err = db.create_user(test_username, "Test User", f"{test_username}@test.local", "testpass123")
+            if ok:
+                u = db.get_user_by_username(test_username)
+                if u:
+                    db.delete_user(u["id"])
+                result = {"success": ok, "message": f"Utilisateur '{test_username}' créé puis supprimé"}
+            else:
+                result = {"success": False, "message": err}
+
+        elif test_name == "imap_folders":
+            test_user_obj = db.get_user_by_username(db.get_setting("super_admin_username", "admin"))
+            if test_user_obj:
+                folders = email_client.get_folders(test_user_obj)
+                result = {"success": bool(folders), "message": f"Dossiers: {', '.join(folders)}"}
+            else:
+                result = {"success": False, "message": "Aucun utilisateur de test"}
+
+        elif test_name == "internal_send":
+            addresses = db.get_all_addresses_for_user(user["id"])
+            if not addresses:
+                result = {"success": False, "message": "Aucune adresse configurée"}
+            else:
+                addr = addresses[0]
+                db.save_inbound_mail(
+                    mail_to=addr.lower(),
+                    mail_from=addr.lower(),
+                    subject="[TEST] Envoi interne automatique",
+                    body_html="<p>Test d'envoi interne réussi.</p>",
+                    body_text="Test d'envoi interne réussi.",
+                    folder="INBOX"
+                )
+                result = {"success": True, "message": f"Mail de test envoyé à {addr}"}
+
+        elif test_name == "groq_ai":
+            groq_key = db.get_setting("groq_api_key", "")
+            if not groq_key:
+                result = {"success": False, "message": "Clé Groq API non configurée"}
+            else:
+                try:
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        r = await client.post(
+                            "https://api.groq.com/openai/v1/chat/completions",
+                            headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                            json={"model": db.get_setting("groq_model", "llama-3.3-70b-versatile"),
+                                  "messages": [{"role": "user", "content": "Réponds juste 'OK' en un mot."}],
+                                  "max_tokens": 5}
+                        )
+                        if r.status_code == 200:
+                            reply = r.json()["choices"][0]["message"]["content"].strip()
+                            result = {"success": True, "message": f"Groq répond: '{reply}'"}
+                        else:
+                            result = {"success": False, "message": f"Groq HTTP {r.status_code}: {r.text[:100]}"}
+                except Exception as e:
+                    result = {"success": False, "message": str(e)}
+
+        elif test_name == "snooze":
+            test_user_obj = user
+            addresses = db.get_all_addresses_for_user(test_user_obj["id"])
+            if not addresses:
+                result = {"success": False, "message": "Aucune adresse pour le test"}
+            else:
+                db.save_inbound_mail(addresses[0].lower(), "test@test.local", "[TEST] Snooze", "", "snooze test")
+                conn_t = db.get_conn()
+                mail_row = conn_t.execute("SELECT id FROM inbound_mails ORDER BY id DESC LIMIT 1").fetchone()
+                conn_t.close()
+                if mail_row:
+                    from datetime import datetime, timedelta
+                    snooze_dt = (datetime.utcnow() + timedelta(seconds=5)).isoformat()
+                    db.snooze_mail(test_user_obj["id"], mail_row["id"], snooze_dt)
+                    result = {"success": True, "message": f"Mail #{mail_row['id']} snoozé jusqu'à +5s"}
+                else:
+                    result = {"success": False, "message": "Impossible de créer le mail de test"}
+
+        elif test_name == "rules":
+            rule_id = db.create_mail_rule(
+                user["id"], "_test_rule", "from", "contains", "_test_noop_",
+                "mark_read", "", 999
+            )
+            db.delete_mail_rule(rule_id, user["id"])
+            result = {"success": True, "message": f"Règle créée (id={rule_id}) puis supprimée"}
+
+        elif test_name == "followup":
+            addresses = db.get_all_addresses_for_user(user["id"])
+            if not addresses:
+                result = {"success": False, "message": "Aucune adresse"}
+            else:
+                db.save_inbound_mail(addresses[0].lower(), "test@test.local", "[TEST] Followup", "", "followup test")
+                conn_t = db.get_conn()
+                mail_row = conn_t.execute("SELECT id FROM inbound_mails ORDER BY id DESC LIMIT 1").fetchone()
+                conn_t.close()
+                if mail_row:
+                    db.set_followup(user["id"], mail_row["id"], days=0)
+                    alerts = db.get_followup_alerts(user["id"], addresses)
+                    result = {"success": True, "message": f"Follow-up OK — {len(alerts)} alerte(s) détectée(s)"}
+                else:
+                    result = {"success": False, "message": "Mail test introuvable"}
+
+    except Exception as e:
+        result = {"success": False, "message": f"Exception: {str(e)}"}
+
+    result["duration_ms"] = round((time.time() - start) * 1000, 1)
+    return JSONResponse(result)
 
 # ============================================================
 # API ROUTES
@@ -441,13 +664,13 @@ async def api_folders(user=Depends(auth.require_auth)):
 
 @app.get("/api/mails")
 async def api_mails(folder: str = "INBOX", page: int = 1, per_page: int = 20,
-    address: str = "", user=Depends(auth.require_auth)):
+    address: str = "", filter: str = "", user=Depends(auth.require_auth)):
     if address:
         user_addrs = db.get_all_addresses_for_user(user["id"])
         if address.lower() not in [a.lower() for a in user_addrs]:
             raise HTTPException(403, detail="Cette adresse ne vous appartient pas")
     return email_client.get_mails(user, folder=folder, page=page, per_page=per_page,
-                                  address=address if address else None)
+                                  address=address if address else None, filter_type=filter)
 
 @app.get("/api/mail/{uid}")
 async def api_mail(uid: int, user=Depends(auth.require_auth)):
@@ -469,6 +692,7 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
     body = (data.get("body") or "").strip()
     from_address = (data.get("from_address") or "").strip()
     is_html = data.get("html", False)
+    scheduled_at = data.get("scheduled_at", "")
 
     if not to:
         return JSONResponse({"success": False, "error": "Destinataire manquant"})
@@ -481,6 +705,11 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
     sent_from = from_address or db.get_primary_address(user["id"]) or f"noreply@{db.get_setting('mail_domain', 'awlor.online')}"
     body_html = body if is_html else ""
     body_text = "" if is_html else body
+
+    # Envoi programmé
+    if scheduled_at:
+        mail_id = db.save_scheduled_mail(user["id"], sent_from, to, subject, body_html, body_text, scheduled_at)
+        return JSONResponse({"success": True, "scheduled": True, "id": mail_id})
 
     to_lower = to.lower()
     is_internal = db.address_exists(to_lower)
@@ -527,6 +756,90 @@ async def api_delete(uid: int, user=Depends(auth.require_auth)):
     ok, err = email_client.delete_mail(user, uid=str(uid))
     return {"success": ok, "error": err}
 
+@app.post("/api/mail/{uid}/move")
+async def api_move(uid: int, request: Request, user=Depends(auth.require_auth)):
+    data = await request.json()
+    folder = data.get("folder", "INBOX")
+    mail = db.get_inbound_mail_by_id(uid)
+    if not mail:
+        raise HTTPException(404)
+    user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
+    if mail.get("to", "").lower() not in user_addrs and mail.get("from", "").lower() not in user_addrs:
+        raise HTTPException(403)
+    db.move_mail(uid, folder)
+    return JSONResponse({"success": True})
+
+@app.post("/api/mail/{uid}/star")
+async def api_star(uid: int, user=Depends(auth.require_auth)):
+    mail = db.get_inbound_mail_by_id(uid)
+    if not mail:
+        raise HTTPException(404)
+    user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
+    if mail.get("to", "").lower() not in user_addrs and mail.get("from", "").lower() not in user_addrs:
+        raise HTTPException(403)
+    starred = db.toggle_star(uid)
+    return JSONResponse({"success": True, "starred": starred})
+
+@app.post("/api/mail/{uid}/seen")
+async def api_toggle_seen(uid: int, user=Depends(auth.require_auth)):
+    mail = db.get_inbound_mail_by_id(uid)
+    if not mail:
+        raise HTTPException(404)
+    user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
+    if mail.get("to", "").lower() not in user_addrs and mail.get("from", "").lower() not in user_addrs:
+        raise HTTPException(403)
+    seen = db.toggle_seen(uid)
+    return JSONResponse({"success": True, "seen": seen})
+
+@app.post("/api/mails/bulk")
+async def api_bulk(request: Request, user=Depends(auth.require_auth)):
+    data = await request.json()
+    mail_ids = [int(i) for i in data.get("ids", [])]
+    action = data.get("action", "")
+    if not mail_ids or not action:
+        return JSONResponse({"success": False, "error": "Paramètres manquants"})
+    addresses = db.get_all_addresses_for_user(user["id"])
+    db.bulk_action_mails(mail_ids, action, addresses)
+    return JSONResponse({"success": True, "count": len(mail_ids)})
+
+@app.post("/api/mail/{uid}/snooze")
+async def api_snooze(uid: int, request: Request, user=Depends(auth.require_auth)):
+    data = await request.json()
+    snooze_until = data.get("snooze_until", "")
+    if not snooze_until:
+        return JSONResponse({"success": False, "error": "Date manquante"})
+    mail = db.get_inbound_mail_by_id(uid)
+    if not mail:
+        raise HTTPException(404)
+    user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
+    if mail.get("to", "").lower() not in user_addrs:
+        raise HTTPException(403)
+    db.snooze_mail(user["id"], uid, snooze_until)
+    return JSONResponse({"success": True})
+
+@app.get("/api/mails/snoozed")
+async def api_snoozed(user=Depends(auth.require_auth)):
+    rows = db.get_snoozed_mails(user["id"])
+    return JSONResponse({"snoozed": rows})
+
+@app.post("/api/mail/{uid}/followup")
+async def api_followup(uid: int, request: Request, user=Depends(auth.require_auth)):
+    data = await request.json()
+    days = int(data.get("days", 3))
+    db.set_followup(user["id"], uid, days)
+    return JSONResponse({"success": True})
+
+@app.get("/api/followup/alerts")
+async def api_followup_alerts(user=Depends(auth.require_auth)):
+    addresses = db.get_all_addresses_for_user(user["id"])
+    alerts = db.get_followup_alerts(user["id"], addresses)
+    return JSONResponse({"alerts": alerts})
+
+@app.post("/api/followup/{fid}/dismiss")
+async def api_followup_dismiss(fid: int, user=Depends(auth.require_auth)):
+    db.dismiss_followup(fid)
+    return JSONResponse({"success": True})
+
 @app.get("/api/my-addresses")
 async def api_my_addresses(user=Depends(auth.require_auth)):
     return {"addresses": db.get_user_addresses(user["id"])}
@@ -534,18 +847,235 @@ async def api_my_addresses(user=Depends(auth.require_auth)):
 @app.get("/api/stats")
 async def api_stats(user=Depends(auth.require_auth)):
     addresses = db.get_all_addresses_for_user(user["id"])
-    unread = 0
-    if addresses:
-        conn = db.get_conn()
-        placeholders = ",".join("?" * len(addresses))
-        lower_addrs = [a.lower() for a in addresses]
-        row = conn.execute(
-            f"SELECT COUNT(*) FROM inbound_mails WHERE mail_to IN ({placeholders}) AND seen=0 AND folder='INBOX'",
-            lower_addrs
-        ).fetchone()
-        conn.close()
-        unread = row[0] if row else 0
-    return {"unread": unread}
+    unseen = db.get_unseen_count(addresses)
+    heatmap = db.get_mail_heatmap(addresses)
+    followup_alerts = db.get_followup_alerts(user["id"], addresses)
+    db.process_snooze_wakeups()
+    return {
+        "unseen": unseen,
+        "unread": unseen,
+        "heatmap": heatmap,
+        "followup_count": len(followup_alerts),
+        "followup_alerts": followup_alerts[:5],
+    }
+
+@app.get("/api/heatmap")
+async def api_heatmap(user=Depends(auth.require_auth)):
+    addresses = db.get_all_addresses_for_user(user["id"])
+    data = db.get_mail_heatmap(addresses)
+    return JSONResponse({"heatmap": data})
+
+@app.get("/api/timeline")
+async def api_timeline(contact: str = "", user=Depends(auth.require_auth)):
+    if not contact:
+        return JSONResponse({"timeline": []})
+    timeline = db.get_mail_timeline(user["id"], contact)
+    return JSONResponse({"timeline": timeline, "contact": contact})
+
+# ============================================================
+# API DRAFTS
+# ============================================================
+
+@app.get("/api/drafts")
+async def api_get_drafts(user=Depends(auth.require_auth)):
+    drafts = db.get_drafts(user["id"])
+    return JSONResponse({"drafts": drafts})
+
+@app.post("/api/drafts")
+async def api_save_draft(request: Request, user=Depends(auth.require_auth)):
+    data = await request.json()
+    draft_id = db.save_draft(
+        user_id=user["id"],
+        mail_from=data.get("from_address", ""),
+        mail_to=data.get("to", ""),
+        subject=data.get("subject", ""),
+        body_html=data.get("body", ""),
+        body_text="",
+        draft_id=data.get("draft_id")
+    )
+    return JSONResponse({"success": True, "draft_id": draft_id})
+
+@app.delete("/api/drafts/{draft_id}")
+async def api_delete_draft(draft_id: int, user=Depends(auth.require_auth)):
+    db.delete_draft(draft_id, user["id"])
+    return JSONResponse({"success": True})
+
+# ============================================================
+# API RULES
+# ============================================================
+
+@app.get("/api/rules")
+async def api_get_rules(user=Depends(auth.require_auth)):
+    rules = db.get_all_mail_rules(user["id"])
+    return JSONResponse({"rules": rules})
+
+@app.post("/api/rules")
+async def api_create_rule(request: Request, user=Depends(auth.require_auth)):
+    data = await request.json()
+    rule_id = db.create_mail_rule(
+        user_id=user["id"],
+        name=data.get("name", "Nouvelle règle"),
+        condition_field=data.get("condition_field", "from"),
+        condition_operator=data.get("condition_operator", "contains"),
+        condition_value=data.get("condition_value", ""),
+        action_type=data.get("action_type", "move_to_folder"),
+        action_value=data.get("action_value", ""),
+        priority=data.get("priority", 0)
+    )
+    return JSONResponse({"success": True, "id": rule_id})
+
+@app.delete("/api/rules/{rule_id}")
+async def api_delete_rule(rule_id: int, user=Depends(auth.require_auth)):
+    db.delete_mail_rule(rule_id, user["id"])
+    return JSONResponse({"success": True})
+
+# ============================================================
+# API TEMPLATES
+# ============================================================
+
+@app.get("/api/templates")
+async def api_get_templates(user=Depends(auth.require_auth)):
+    tpls = db.get_reply_templates(user["id"])
+    return JSONResponse({"templates": tpls})
+
+@app.post("/api/templates")
+async def api_create_template(request: Request, user=Depends(auth.require_auth)):
+    data = await request.json()
+    tpl_id = db.create_reply_template(
+        user_id=user["id"],
+        name=data.get("name", "Nouveau template"),
+        subject=data.get("subject", ""),
+        body_html=data.get("body_html", ""),
+        shortcut=data.get("shortcut", "")
+    )
+    return JSONResponse({"success": True, "id": tpl_id})
+
+@app.delete("/api/templates/{tpl_id}")
+async def api_delete_template(tpl_id: int, user=Depends(auth.require_auth)):
+    db.delete_reply_template(tpl_id, user["id"])
+    return JSONResponse({"success": True})
+
+# ============================================================
+# API FOLDER COLORS
+# ============================================================
+
+@app.get("/api/folder-colors")
+async def api_get_folder_colors(user=Depends(auth.require_auth)):
+    colors = db.get_folder_colors(user["id"])
+    return JSONResponse({"colors": colors})
+
+@app.post("/api/folder-colors")
+async def api_set_folder_color(request: Request, user=Depends(auth.require_auth)):
+    data = await request.json()
+    db.set_folder_color(user["id"], data.get("folder", ""), data.get("color", "#6C63FF"))
+    return JSONResponse({"success": True})
+
+# ============================================================
+# API READ RECEIPTS
+# ============================================================
+
+@app.get("/api/mail/{uid}/receipts")
+async def api_read_receipts(uid: int, user=Depends(auth.require_auth)):
+    mail = db.get_inbound_mail_by_id(uid)
+    if not mail:
+        raise HTTPException(404)
+    user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
+    if mail.get("from", "").lower() not in user_addrs:
+        raise HTTPException(403)
+    receipts = db.get_read_receipts(uid)
+    return JSONResponse({"receipts": receipts})
+
+# ============================================================
+# API AI (GROQ)
+# ============================================================
+
+@app.post("/api/ai/chat")
+async def api_ai_chat(request: Request, user=Depends(auth.require_auth)):
+    ai_enabled = db.get_setting("ai_enabled", "1")
+    if ai_enabled != "1":
+        return JSONResponse({"success": False, "error": "IA désactivée"})
+
+    groq_key = db.get_setting("groq_api_key", "")
+    if not groq_key:
+        return JSONResponse({"success": False, "error": "Clé Groq non configurée. Ajoutez GROQ_API_KEY dans les paramètres admin."})
+
+    groq_model = db.get_setting("groq_model", "llama-3.3-70b-versatile")
+    data = await request.json()
+    user_message = data.get("message", "").strip()
+    mail_context = data.get("mail_context", None)
+    action = data.get("action", "chat")
+
+    if not user_message and not action:
+        return JSONResponse({"success": False, "error": "Message vide"})
+
+    history = db.get_ai_history(user["id"], limit=10)
+    addresses = db.get_all_addresses_for_user(user["id"])
+    primary_addr = db.get_primary_address(user["id"])
+
+    system_prompt = f"""Tu es Awlor AI, l'assistant intelligent intégré à la boîte mail Awlor.
+Tu as accès à la boîte mail de {user['display_name']} ({primary_addr}).
+Tu peux : résumer des mails, rédiger des réponses, détecter du spam, traduire, trier, analyser des conversations.
+Réponds toujours en français sauf si l'utilisateur écrit dans une autre langue.
+Sois concis, professionnel et utile. Quand tu génères un mail, formate-le clairement avec Objet: et Corps:.
+Adresses de l'utilisateur : {', '.join(addresses) if addresses else 'aucune'}"""
+
+    if mail_context:
+        system_prompt += f"\n\nCONTEXTE MAIL ACTUEL:\nDe: {mail_context.get('from','')}\nObjet: {mail_context.get('subject','')}\nContenu: {mail_context.get('body','')[:2000]}"
+
+    messages = [{"role": "system", "content": system_prompt}]
+    for h in history[-8:]:
+        messages.append({"role": h["role"], "content": h["content"]})
+
+    if action == "summarize" and mail_context:
+        user_message = f"Fais un résumé concis de ce mail en 3-4 phrases maximum."
+    elif action == "reply" and mail_context:
+        user_message = f"Rédige une réponse professionnelle et courtoise à ce mail."
+    elif action == "spam" and mail_context:
+        user_message = f"Analyse ce mail et dis-moi s'il s'agit de spam ou d'un mail légitime. Justifie ta réponse."
+    elif action == "translate" and mail_context:
+        user_message = f"Traduis ce mail en français de manière naturelle."
+    elif action == "compose":
+        user_message = data.get("message", "Rédige un mail professionnel.")
+
+    messages.append({"role": "user", "content": user_message})
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                json={"model": groq_model, "messages": messages, "max_tokens": 1024, "temperature": 0.7}
+            )
+            if r.status_code != 200:
+                return JSONResponse({"success": False, "error": f"Groq API error {r.status_code}: {r.text[:200]}"})
+
+            response_data = r.json()
+            ai_reply = response_data["choices"][0]["message"]["content"]
+
+            db.save_ai_message(user["id"], "user", user_message)
+            db.save_ai_message(user["id"], "assistant", ai_reply)
+
+            return JSONResponse({
+                "success": True,
+                "reply": ai_reply,
+                "model": groq_model,
+                "tokens": response_data.get("usage", {})
+            })
+
+    except httpx.TimeoutException:
+        return JSONResponse({"success": False, "error": "Timeout — Groq ne répond pas"})
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)})
+
+@app.get("/api/ai/history")
+async def api_ai_history(user=Depends(auth.require_auth)):
+    history = db.get_ai_history(user["id"], limit=50)
+    return JSONResponse({"history": history})
+
+@app.post("/api/ai/clear")
+async def api_ai_clear(user=Depends(auth.require_auth)):
+    db.clear_ai_history(user["id"])
+    return JSONResponse({"success": True})
 
 # ============================================================
 # API MODÉRATION
