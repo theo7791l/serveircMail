@@ -1,143 +1,465 @@
 {% extends 'base.html' %}
-{% block title %}Rédiger — {{ site_name }}{% endblock %}
-{% block page_title %}<i class="fa fa-pen-to-square" style="color:var(--primary)"></i> Nouveau message{% endblock %}
-{% block content %}
-<div style="max-width:860px;margin:0 auto">
-  <div class="card">
-    <div class="card-body" style="padding:28px 32px">
+{% block title %}Nouveau mail — {{ site_name }}{% endblock %}
+{% block page_title %}<i class="fa fa-pen-to-square" style="color:var(--primary)"></i> Nouveau mail{% endblock %}
+{% block topbar_actions %}
+<button class="topbar-btn" id="ai-toggle-btn" onclick="toggleAiPanel()" title="Ouvrir l'IA"><i class="fa fa-robot" style="color:var(--primary)"></i></button>
+{% endblock %}
 
-      <!-- Expéditeur -->
+{% block content %}
+<div style="display:flex;gap:20px;height:calc(100vh - 64px - 56px - 32px);">
+
+  <!-- FORMULAIRE COMPOSE -->
+  <div class="card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="padding:20px 24px;border-bottom:1px solid var(--border);">
+      <h2 style="font-size:16px;font-weight:700;"><i class="fa fa-pen-to-square" style="color:var(--primary)"></i> Rédiger un mail</h2>
+    </div>
+
+    <div style="flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;gap:16px;">
+
+      <!-- De -->
       <div class="form-group">
-        <label class="form-label"><i class="fa fa-user"></i> Expéditeur</label>
-        {% if addresses|length > 1 %}
-        <select class="form-select" id="fromSelect">
+        <label class="form-label">De</label>
+        <select id="from-address" class="form-input">
           {% for addr in addresses %}
-          <option value="{{ addr.address }}" {% if addr.address == primary_address %}selected{% endif %}>
-            {{ addr.address }}{% if addr.is_primary %} ★{% endif %}
-          </option>
+          <option value="{{ addr.address }}" {% if primary_address == addr.address %}selected{% endif %}>{{ addr.label or addr.address }} &lt;{{ addr.address }}&gt;</option>
           {% endfor %}
         </select>
-        {% else %}
-        <div style="padding:10px 14px;background:var(--bg-hover);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;color:var(--text)">
-          <i class="fa fa-at" style="color:var(--primary)"></i>
-          <strong>{{ primary_address or (addresses[0].address if addresses else '') }}</strong>
+      </div>
+
+      <!-- À -->
+      <div class="form-group">
+        <label class="form-label">À</label>
+        <div style="position:relative;">
+          <input type="email" id="to-input" class="form-input" placeholder="destinataire@exemple.com"
+            value="{% if draft %}{{ draft.mail_to }}{% elif reply_to %}{% endif %}"
+            style="padding-right:40px;">
         </div>
-        <input type="hidden" id="fromSelect" value="{{ primary_address or (addresses[0].address if addresses else '') }}" />
-        {% endif %}
       </div>
 
-      <!-- Destinataire -->
+      <!-- Objet -->
       <div class="form-group">
-        <label class="form-label"><i class="fa fa-at"></i> Destinataire</label>
-        <input class="form-input" type="email" id="toInput" value="{{ reply_to }}" placeholder="destinataire@exemple.com" />
+        <label class="form-label">Objet</label>
+        <input type="text" id="subject-input" class="form-input" placeholder="Objet du mail"
+          value="{% if draft %}{{ draft.subject }}{% elif subject %}{{ subject }}{% endif %}">
       </div>
 
-      <!-- Sujet -->
-      <div class="form-group">
-        <label class="form-label"><i class="fa fa-tag"></i> Sujet</label>
-        <input class="form-input" type="text" id="subjectInput" value="{{ subject }}" placeholder="Objet du message" />
-      </div>
-
-      <!-- Corps -->
-      <div class="form-group">
-        <label class="form-label"><i class="fa fa-align-left"></i> Message</label>
-        <div class="compose-toolbar">
-          <button class="toolbar-btn" type="button" onclick="fmt('bold')" title="Gras"><i class="fa fa-bold"></i></button>
-          <button class="toolbar-btn" type="button" onclick="fmt('italic')" title="Italique"><i class="fa fa-italic"></i></button>
-          <button class="toolbar-btn" type="button" onclick="fmt('underline')" title="Souligner"><i class="fa fa-underline"></i></button>
-          <button class="toolbar-btn" type="button" onclick="fmt('strikeThrough')" title="Barrer"><i class="fa fa-strikethrough"></i></button>
-          <div style="width:1px;background:var(--border);margin:0 4px"></div>
-          <button class="toolbar-btn" type="button" onclick="fmt('insertUnorderedList')" title="Liste"><i class="fa fa-list-ul"></i></button>
-          <button class="toolbar-btn" type="button" onclick="fmt('insertOrderedList')" title="Liste numérotée"><i class="fa fa-list-ol"></i></button>
-          <div style="width:1px;background:var(--border);margin:0 4px"></div>
-          <button class="toolbar-btn" type="button" onclick="toggleHtml()" id="htmlToggle" title="Mode HTML"><i class="fa fa-code"></i></button>
+      <!-- Toolbar éditeur riche -->
+      <div style="display:flex;align-items:center;gap:4px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-bottom:none;border-radius:var(--radius) var(--radius) 0 0;flex-wrap:wrap;">
+        <button type="button" class="editor-btn" onclick="execCmd('bold')" title="Gras (Ctrl+B)"><i class="fa fa-bold"></i></button>
+        <button type="button" class="editor-btn" onclick="execCmd('italic')" title="Italique (Ctrl+I)"><i class="fa fa-italic"></i></button>
+        <button type="button" class="editor-btn" onclick="execCmd('underline')" title="Souligné (Ctrl+U)"><i class="fa fa-underline"></i></button>
+        <button type="button" class="editor-btn" onclick="execCmd('strikeThrough')" title="Barré"><i class="fa fa-strikethrough"></i></button>
+        <div style="width:1px;height:20px;background:var(--border);margin:0 6px;"></div>
+        <button type="button" class="editor-btn" onclick="execCmd('insertUnorderedList')" title="Liste à puces"><i class="fa fa-list-ul"></i></button>
+        <button type="button" class="editor-btn" onclick="execCmd('insertOrderedList')" title="Liste numérotée"><i class="fa fa-list-ol"></i></button>
+        <div style="width:1px;height:20px;background:var(--border);margin:0 6px;"></div>
+        <button type="button" class="editor-btn" onclick="insertLink()" title="Insérer un lien"><i class="fa fa-link"></i></button>
+        <button type="button" class="editor-btn" onclick="execCmd('justifyLeft')"><i class="fa fa-align-left"></i></button>
+        <button type="button" class="editor-btn" onclick="execCmd('justifyCenter')"><i class="fa fa-align-center"></i></button>
+        <button type="button" class="editor-btn" onclick="execCmd('justifyRight')"><i class="fa fa-align-right"></i></button>
+        <div style="width:1px;height:20px;background:var(--border);margin:0 6px;"></div>
+        <select onchange="execCmd('fontName',this.value)" class="editor-select">
+          <option value="">Police</option>
+          <option value="Arial">Arial</option>
+          <option value="Georgia">Georgia</option>
+          <option value="Courier New">Mono</option>
+          <option value="Times New Roman">Serif</option>
+        </select>
+        <select onchange="execCmd('fontSize',this.value)" class="editor-select">
+          <option value="">Taille</option>
+          <option value="1">XS</option>
+          <option value="2">S</option>
+          <option value="3">M</option>
+          <option value="4">L</option>
+          <option value="5">XL</option>
+          <option value="6">XXL</option>
+        </select>
+        <div style="width:1px;height:20px;background:var(--border);margin:0 6px;"></div>
+        <!-- Templates -->
+        <div style="position:relative;">
+          <button type="button" class="editor-btn" onclick="toggleTemplates()" title="Templates"><i class="fa fa-rectangle-list"></i> Templates</button>
+          <div id="templates-dropdown" style="display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:2000;background:rgba(12,12,28,0.98);border:1px solid var(--border-glow);border-radius:var(--radius);padding:6px;min-width:220px;box-shadow:0 12px 40px rgba(0,0,0,0.6);">
+            {% if templates_list %}
+            {% for t in templates_list %}
+            <button type="button" onclick="applyTemplate({{ t.id }})" class="template-item">
+              <i class="fa fa-file-lines" style="color:var(--primary)"></i>
+              {{ t.name }}
+              {% if t.shortcut %}<kbd class="shortcut-kbd">{{ t.shortcut }}</kbd>{% endif %}
+            </button>
+            {% endfor %}
+            {% else %}
+            <p style="padding:12px;font-size:12px;color:var(--text-dim);">Aucun template. <a href="/templates" style="color:var(--primary);">Créer</a></p>
+            {% endif %}
+          </div>
         </div>
-        <div id="editorArea" contenteditable="true"
-          style="min-height:260px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:14px;outline:none;line-height:1.6;transition:var(--transition)"
-          onfocus="this.style.borderColor='var(--primary)';this.style.background='rgba(108,99,255,0.04)'"
-          onblur="this.style.borderColor='var(--border)';this.style.background='rgba(255,255,255,0.03)'"></div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+          <button type="button" class="editor-btn" onclick="toggleReadReceipt()" id="rr-btn" title="Confirmation de lecture"><i class="fa fa-eye"></i></button>
+          <span id="rr-badge" style="display:none;font-size:10px;background:var(--primary);color:#fff;padding:1px 6px;border-radius:10px;">RR</span>
+        </div>
       </div>
 
-      <div style="display:flex;gap:12px;align-items:center">
-        <button class="btn btn-primary btn-lg" id="sendBtn" onclick="sendMail()">
-          <i class="fa fa-paper-plane"></i> Envoyer
-        </button>
-        <a href="/inbox" class="btn btn-ghost"><i class="fa fa-xmark"></i> Annuler</a>
-        <div id="sendStatus" style="display:none;font-size:13px;margin-left:8px"></div>
+      <!-- Zone de texte riche -->
+      <div id="editor" contenteditable="true"
+        style="flex:1;min-height:240px;padding:16px 20px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:0 0 var(--radius) var(--radius);outline:none;color:var(--text);font-size:14px;line-height:1.7;overflow-y:auto;transition:border-color .2s;"
+        oninput="onEditorChange()"
+        onkeydown="editorShortcuts(event)"
+      >{% if draft %}{{ draft.body_html|safe }}{% endif %}</div>
+
+      <!-- Read receipt + Scheduled send -->
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="schedule-toggle" onchange="toggleSchedule(this.checked)" style="accent-color:var(--primary);">
+          <label for="schedule-toggle" style="font-size:13px;color:var(--text-muted);"><i class="fa fa-calendar-clock"></i> Envoi programmé</label>
+        </div>
+        <div id="schedule-input" style="display:none;">
+          <input type="datetime-local" id="schedule-at" class="form-input" style="padding:7px 12px;font-size:13px;">
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="expiry-toggle" onchange="toggleExpiry(this.checked)" style="accent-color:var(--primary);">
+          <label for="expiry-toggle" style="font-size:13px;color:var(--text-muted);"><i class="fa fa-hourglass-end"></i> Expiration</label>
+        </div>
+        <div id="expiry-input" style="display:none;">
+          <select id="expiry-days" class="form-input" style="padding:7px 12px;font-size:13px;">
+            <option value="1">1 jour</option>
+            <option value="3">3 jours</option>
+            <option value="7">7 jours</option>
+            <option value="30">30 jours</option>
+          </select>
+        </div>
       </div>
 
     </div>
+
+    <!-- ACTIONS -->
+    <div style="padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center;">
+      <button class="btn btn-primary" onclick="sendMail()" id="send-btn">
+        <i class="fa fa-paper-plane"></i> Envoyer
+      </button>
+      <button class="btn btn-ghost" onclick="saveDraft()">
+        <i class="fa fa-floppy-disk"></i> Brouillon
+      </button>
+      <button class="btn btn-ghost" onclick="aiCompose()">
+        <i class="fa fa-robot" style="color:var(--primary)"></i> IA
+      </button>
+      <span id="compose-status" style="font-size:12px;color:var(--text-dim);"></span>
+      <div style="margin-left:auto;">
+        <a href="/inbox" class="btn btn-ghost"><i class="fa fa-xmark"></i> Annuler</a>
+      </div>
+    </div>
   </div>
+
+  <!-- PANNEAU IA -->
+  <div id="ai-panel" style="width:0;transition:width 0.35s cubic-bezier(0.4,0,0.2,1);overflow:hidden;flex-shrink:0;">
+    <div class="card" style="height:100%;display:flex;flex-direction:column;min-width:340px;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;">
+        <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--accent2));display:flex;align-items:center;justify-content:center;">
+          <i class="fa fa-robot" style="font-size:14px;"></i>
+        </div>
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:700;">Awlor AI</div>
+          <div style="font-size:11px;color:var(--text-dim);">Groq • Assistance rédaction</div>
+        </div>
+        <button class="topbar-btn" onclick="toggleAiPanel()" style="width:28px;height:28px;"><i class="fa fa-xmark"></i></button>
+      </div>
+
+      <!-- Actions rapides IA -->
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;">
+        <button class="ai-action-btn" onclick="aiAction('compose')"><i class="fa fa-pen"></i> Générer</button>
+        <button class="ai-action-btn" onclick="aiAction('improve')"><i class="fa fa-wand-magic-sparkles"></i> Améliorer</button>
+        <button class="ai-action-btn" onclick="aiAction('formal')"><i class="fa fa-user-tie"></i> Formel</button>
+        <button class="ai-action-btn" onclick="aiAction('short')"><i class="fa fa-scissors"></i> Raccourcir</button>
+      </div>
+
+      <!-- Historique chat -->
+      <div id="ai-compose-history" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;">
+        <div style="text-align:center;color:var(--text-dim);font-size:12px;">Décrivez ce que vous voulez rédiger...</div>
+      </div>
+
+      <!-- Input -->
+      <div style="padding:12px 16px;border-top:1px solid var(--border);">
+        <div style="display:flex;gap:8px;">
+          <input id="ai-compose-input" type="text" class="form-input" placeholder="Ex: Rédige un mail de relance commercial..." style="flex:1;font-size:13px;"
+            onkeydown="if(event.key==='Enter')sendAiCompose()">
+          <button class="btn btn-primary btn-sm" onclick="sendAiCompose()" style="padding:8px 14px;"><i class="fa fa-arrow-up"></i></button>
+        </div>
+        <div id="ai-compose-insert" style="display:none;margin-top:8px;">
+          <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;font-size:12px;" onclick="insertAiToEditor()"><i class="fa fa-arrow-down"></i> Insérer dans l'éditeur</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
-<script>
-function fmt(cmd) { document.execCommand(cmd, false, null); }
-let htmlMode = false;
+<style>
+.editor-btn {
+  background:none;border:none;cursor:pointer;color:var(--text-muted);padding:6px 9px;
+  border-radius:6px;font-size:13px;transition:var(--transition);font-family:var(--font);
+}
+.editor-btn:hover{background:rgba(108,99,255,0.15);color:var(--text);}
+.editor-select{
+  background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--text-muted);
+  border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;font-family:var(--font);
+}
+.template-item{
+  display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;
+  background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px;
+  border-radius:6px;font-family:var(--font);transition:var(--transition);
+}
+.template-item:hover{background:var(--bg-card-hover);color:var(--text);}
+.shortcut-kbd{font-size:10px;padding:1px 5px;background:rgba(255,255,255,0.08);border:1px solid var(--border);border-radius:3px;margin-left:auto;}
+.ai-action-btn{
+  padding:5px 12px;background:rgba(108,99,255,0.12);border:1px solid rgba(108,99,255,0.25);
+  color:var(--primary);border-radius:20px;font-size:12px;cursor:pointer;font-family:var(--font);
+  transition:var(--transition);display:flex;align-items:center;gap:5px;
+}
+.ai-action-btn:hover{background:rgba(108,99,255,0.25);border-color:var(--primary);}
+#editor:focus{border-color:var(--border-glow);box-shadow:0 0 0 3px rgba(108,99,255,0.1);}
+</style>
 
-function getFromAddress() {
-  const el = document.getElementById('fromSelect');
-  if (!el) return '';
-  return el.tagName === 'SELECT' ? el.value : el.value;
+<script>
+const TEMPLATES = {{ templates_list | tojson }};
+const DRAFT_ID = '{{ draft_id }}';
+let aiPanelOpen = false;
+let autoSaveTimer = null;
+let lastAiReply = '';
+let readReceiptEnabled = false;
+
+// ===== EDITOR SHORTCUTS =====
+function execCmd(cmd, val) {
+  document.getElementById('editor').focus();
+  document.execCommand(cmd, false, val || null);
 }
 
-function toggleHtml() {
-  const area = document.getElementById('editorArea');
-  htmlMode = !htmlMode;
-  document.getElementById('htmlToggle').classList.toggle('active', htmlMode);
-  if (htmlMode) {
-    const ta = document.createElement('textarea');
-    ta.id = 'editorArea';
-    ta.value = area.innerHTML;
-    ta.style.cssText = 'min-height:260px;width:100%;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:13px;font-family:"JetBrains Mono",monospace;outline:none;resize:vertical;box-sizing:border-box';
-    area.replaceWith(ta);
-  } else {
-    const ta = document.getElementById('editorArea');
-    const div = document.createElement('div');
-    div.id = 'editorArea'; div.contentEditable = 'true';
-    div.style.cssText = 'min-height:260px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);padding:16px;color:var(--text);font-size:14px;outline:none;line-height:1.6';
-    div.innerHTML = ta.value;
-    ta.replaceWith(div);
+function editorShortcuts(e) {
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key==='b') { e.preventDefault(); execCmd('bold'); }
+    if (e.key==='i') { e.preventDefault(); execCmd('italic'); }
+    if (e.key==='u') { e.preventDefault(); execCmd('underline'); }
+    if (e.key==='Enter') { e.preventDefault(); sendMail(); }
+    if (e.key==='s') { e.preventDefault(); saveDraft(); }
   }
 }
 
-async function sendMail() {
-  const to = document.getElementById('toInput').value.trim();
-  const subject = document.getElementById('subjectInput').value.trim();
-  const area = document.getElementById('editorArea');
-  const body = htmlMode ? area.value : area.innerHTML;
-  const from_address = getFromAddress();
+function insertLink() {
+  const url = prompt('URL du lien :');
+  if (url) execCmd('createLink', url);
+}
 
-  if (!to) { showStatus('Destinataire requis', 'error'); return; }
-  if (!subject) { showStatus('Sujet requis', 'error'); return; }
+// ===== AUTO-SAVE DRAFT =====
+function onEditorChange() {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(autoSaveDraft, 2000);
+}
 
-  const btn = document.getElementById('sendBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa fa-circle-notch fa-spin"></i> Envoi en cours...';
-
-  const res = await fetch('/api/send', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ to, subject, body, html: htmlMode, from_address })
-  });
+async function autoSaveDraft() {
+  const to = document.getElementById('to-input').value.trim();
+  const subject = document.getElementById('subject-input').value.trim();
+  const body = document.getElementById('editor').innerHTML;
+  if (!to && !subject && !body) return;
+  const payload = {
+    to, subject, body,
+    from_address: document.getElementById('from-address').value,
+    draft_id: DRAFT_ID || window._draftId || null
+  };
+  const res = await fetch('/api/drafts', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const data = await res.json();
+  if (data.draft_id) window._draftId = data.draft_id;
+  const st = document.getElementById('compose-status');
+  st.textContent = '✓ Brouillon sauvegardé';
+  setTimeout(()=>st.textContent='',3000);
+}
 
-  if (data.success) {
-    showStatus('Mail envoyé !', 'success');
-    setTimeout(() => window.location = '/inbox?folder=Sent', 1500);
-  } else {
-    showStatus(data.error || 'Erreur inconnue', 'error');
+async function saveDraft() {
+  await autoSaveDraft();
+  showToast('Brouillon sauvegardé', 'success');
+}
+
+// ===== TEMPLATES =====
+function toggleTemplates() {
+  const dd = document.getElementById('templates-dropdown');
+  dd.style.display = dd.style.display==='none' ? 'block' : 'none';
+  setTimeout(()=>document.addEventListener('click',()=>{dd.style.display='none';},{once:true}),50);
+}
+
+function applyTemplate(id) {
+  const t = TEMPLATES.find(x => x.id === id);
+  if (!t) return;
+  const subject = document.getElementById('subject-input');
+  const editor = document.getElementById('editor');
+  const now = new Date();
+  const vars = {
+    '{{date}}': now.toLocaleDateString('fr-FR'),
+    '{{nom}}': 'Destinataire',
+    '{{heure}}': now.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})
+  };
+  let body = t.body_html || '';
+  let subj = t.subject || '';
+  Object.entries(vars).forEach(([k,v]) => {
+    body = body.replaceAll(k, v);
+    subj = subj.replaceAll(k, v);
+  });
+  if (subj && !subject.value) subject.value = subj;
+  editor.innerHTML = body;
+  document.getElementById('templates-dropdown').style.display = 'none';
+  showToast(`Template "${t.name}" appliqué`, 'success');
+}
+
+// ===== READ RECEIPT =====
+function toggleReadReceipt() {
+  readReceiptEnabled = !readReceiptEnabled;
+  document.getElementById('rr-badge').style.display = readReceiptEnabled ? 'inline' : 'none';
+  document.getElementById('rr-btn').style.color = readReceiptEnabled ? 'var(--primary)' : '';
+  showToast(readReceiptEnabled ? 'Confirmation de lecture activée' : 'Confirmation de lecture désactivée', 'info');
+}
+
+// ===== SCHEDULED SEND =====
+function toggleSchedule(on) {
+  document.getElementById('schedule-input').style.display = on ? 'block' : 'none';
+  const btn = document.getElementById('send-btn');
+  btn.innerHTML = on ? '<i class="fa fa-calendar-check"></i> Programmer' : '<i class="fa fa-paper-plane"></i> Envoyer';
+}
+
+function toggleExpiry(on) {
+  document.getElementById('expiry-input').style.display = on ? 'block' : 'none';
+}
+
+// ===== SEND MAIL =====
+async function sendMail() {
+  const to = document.getElementById('to-input').value.trim();
+  const subject = document.getElementById('subject-input').value.trim();
+  const body = document.getElementById('editor').innerHTML;
+  const from_address = document.getElementById('from-address').value;
+  const schedToggle = document.getElementById('schedule-toggle').checked;
+  const schedAt = document.getElementById('schedule-at').value;
+  const expiryOn = document.getElementById('expiry-toggle').checked;
+  const expiryDays = document.getElementById('expiry-days').value;
+
+  if (!to) return showToast('Destinataire manquant', 'error');
+  if (!subject) return showToast('Objet manquant', 'error');
+
+  let bodyFinal = body;
+  // Inject read receipt pixel
+  if (readReceiptEnabled) {
+    bodyFinal += `<img src="/track/__MAIL_ID__.png" width="1" height="1" style="display:none">`;
+  }
+
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Envoi...';
+
+  const payload = {
+    to, subject, body: bodyFinal,
+    from_address, html: true,
+    scheduled_at: schedToggle && schedAt ? schedAt : '',
+    expiry_days: expiryOn ? parseInt(expiryDays) : 0,
+    read_receipt: readReceiptEnabled
+  };
+
+  try {
+    const res = await fetch('/api/send', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.success) {
+      if (data.scheduled) {
+        showToast('⏰ Mail programmé avec succès !', 'success');
+        setTimeout(()=>window.location.href='/inbox', 1500);
+      } else {
+        showToast('✓ Mail envoyé !', 'success');
+        // Delete draft if existed
+        const draftId = DRAFT_ID || window._draftId;
+        if (draftId) await fetch(`/api/drafts/${draftId}`,{method:'DELETE'});
+        setTimeout(()=>window.location.href='/inbox', 800);
+      }
+    } else {
+      showToast(data.error || 'Erreur d\'envoi', 'error');
+      btn.disabled = false;
+      btn.innerHTML = schedToggle ? '<i class="fa fa-calendar-check"></i> Programmer' : '<i class="fa fa-paper-plane"></i> Envoyer';
+    }
+  } catch (e) {
+    showToast('Erreur réseau', 'error');
     btn.disabled = false;
     btn.innerHTML = '<i class="fa fa-paper-plane"></i> Envoyer';
   }
 }
 
-function showStatus(msg, type) {
-  const el = document.getElementById('sendStatus');
-  el.style.display = 'flex';
-  el.style.alignItems = 'center';
-  el.style.gap = '6px';
-  el.style.color = type === 'success' ? 'var(--accent3)' : 'var(--accent2)';
-  el.innerHTML = `<i class="fa fa-${type === 'success' ? 'check-circle' : 'circle-xmark'}"></i> ${msg}`;
+// ===== AI PANEL =====
+function toggleAiPanel() {
+  aiPanelOpen = !aiPanelOpen;
+  document.getElementById('ai-panel').style.width = aiPanelOpen ? '360px' : '0';
 }
+
+function aiCompose() {
+  if (!aiPanelOpen) toggleAiPanel();
+  document.getElementById('ai-compose-input').focus();
+}
+
+async function sendAiCompose() {
+  const input = document.getElementById('ai-compose-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  appendAiMsg('user', msg);
+  appendAiMsg('assistant', '<span class="ai-typing"><span></span><span></span><span></span></span>');
+  const res = await fetch('/api/ai/chat', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({message: msg, action: 'compose'})
+  });
+  const data = await res.json();
+  const hist = document.getElementById('ai-compose-history');
+  hist.lastElementChild.remove();
+  if (data.success) {
+    lastAiReply = data.reply;
+    appendAiMsg('assistant', escHtml(data.reply));
+    document.getElementById('ai-compose-insert').style.display = 'block';
+  } else {
+    appendAiMsg('assistant', `<span style="color:var(--accent2)">${escHtml(data.error)}</span>`);
+  }
+}
+
+async function aiAction(action) {
+  const currentBody = document.getElementById('editor').innerHTML;
+  const subject = document.getElementById('subject-input').value;
+  let msg = '';
+  if (action==='improve') msg = 'Améliore le style et la clarté de ce mail, rends-le plus professionnel.';
+  if (action==='formal') msg = 'Reformule ce mail dans un style très formel et courtois.';
+  if (action==='short') msg = 'Raccourcis ce mail tout en gardant l\'essentiel.';
+  if (action==='compose') { document.getElementById('ai-compose-input').focus(); return; }
+  appendAiMsg('user', msg);
+  appendAiMsg('assistant', '<span class="ai-typing"><span></span><span></span><span></span></span>');
+  const res = await fetch('/api/ai/chat', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({message: msg, mail_context: {subject, body: currentBody}, action: 'chat'})
+  });
+  const data = await res.json();
+  document.getElementById('ai-compose-history').lastElementChild.remove();
+  if (data.success) {
+    lastAiReply = data.reply;
+    appendAiMsg('assistant', escHtml(data.reply));
+    document.getElementById('ai-compose-insert').style.display = 'block';
+  } else {
+    appendAiMsg('assistant', `<span style="color:var(--accent2)">${escHtml(data.error||'Erreur IA')}</span>`);
+  }
+  if (!aiPanelOpen) toggleAiPanel();
+}
+
+function insertAiToEditor() {
+  const editor = document.getElementById('editor');
+  editor.innerHTML = lastAiReply.replace(/\n/g, '<br>');
+  showToast('Texte IA inséré', 'success');
+  document.getElementById('ai-compose-insert').style.display = 'none';
+}
+
+function appendAiMsg(role, html) {
+  const hist = document.getElementById('ai-compose-history');
+  const div = document.createElement('div');
+  div.style.cssText = `display:flex;gap:8px;${role==='user'?'flex-direction:row-reverse':''};;animation:mailItemIn .3s ease`;
+  div.innerHTML = `<div style="max-width:85%;padding:10px 14px;border-radius:${role==='user'?'16px 16px 4px 16px':'16px 16px 16px 4px'};background:${role==='user'?'linear-gradient(135deg,var(--primary),var(--accent2))':'rgba(255,255,255,0.05)'};font-size:13px;line-height:1.6;white-space:pre-wrap;">${html}</div>`;
+  hist.appendChild(div);
+  hist.scrollTop = hist.scrollHeight;
+}
+
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 </script>
 {% endblock %}

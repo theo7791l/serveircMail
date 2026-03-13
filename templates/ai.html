@@ -1,0 +1,233 @@
+{% extends 'base.html' %}
+{% block title %}IA Awlor — {{ site_name }}{% endblock %}
+{% block page_title %}<i class="fa fa-robot" style="color:var(--primary)"></i> Awlor AI{% endblock %}
+
+{% block content %}
+{% if not groq_configured %}
+<div class="card" style="padding:32px;text-align:center;">
+  <i class="fa fa-triangle-exclamation" style="font-size:40px;color:var(--gold);margin-bottom:16px;"></i>
+  <h2 style="font-size:18px;font-weight:700;margin-bottom:8px;">Groq API non configurée</h2>
+  <p style="color:var(--text-muted);font-size:14px;margin-bottom:20px;">Ajoutez votre clé Groq dans les paramètres admin pour activer l'IA.</p>
+  <a href="/admin/settings" class="btn btn-primary"><i class="fa fa-gear"></i> Paramètres admin</a>
+</div>
+{% else %}
+<div style="display:flex;gap:20px;height:calc(100vh - 64px - 56px - 32px);">
+
+  <!-- PANNEAU IA PRINCIPAL -->
+  <div class="card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+    <!-- Header -->
+    <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;">
+      <div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--accent2));display:flex;align-items:center;justify-content:center;box-shadow:0 0 20px rgba(108,99,255,0.4);">
+        <i class="fa fa-robot" style="font-size:18px;"></i>
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:16px;font-weight:700;">Awlor AI</div>
+        <div style="font-size:12px;color:var(--text-dim);">Groq • Votre assistant mail intelligent</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="clearHistory()"><i class="fa fa-trash"></i> Effacer</button>
+    </div>
+
+    <!-- Actions rapides -->
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;">
+      <button class="ai-quick-btn" onclick="quickAction('summarize')"><i class="fa fa-compress"></i> Résumer</button>
+      <button class="ai-quick-btn" onclick="quickAction('reply')"><i class="fa fa-reply"></i> Répondre</button>
+      <button class="ai-quick-btn" onclick="quickAction('spam')"><i class="fa fa-shield-virus"></i> Spam?</button>
+      <button class="ai-quick-btn" onclick="quickAction('translate')"><i class="fa fa-language"></i> Traduire</button>
+      <button class="ai-quick-btn" onclick="quickAction('compose')"><i class="fa fa-pen"></i> Générer</button>
+      <button class="ai-quick-btn" onclick="quickAction('sort')"><i class="fa fa-filter"></i> Trier inbox</button>
+    </div>
+
+    <!-- Historique chat -->
+    <div id="ai-history" style="flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px;">
+      <div style="text-align:center;animation:mailItemIn .5s ease;">
+        <div style="display:inline-block;padding:16px 24px;background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.2);border-radius:16px;">
+          <i class="fa fa-robot" style="font-size:24px;color:var(--primary);margin-bottom:8px;display:block;"></i>
+          <p style="font-size:14px;color:var(--text-muted);margin:0;">Bonjour ! Je suis Awlor AI.<br>Posez-moi une question sur vos mails.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Zone de saisie -->
+    <div style="padding:16px 20px;border-top:1px solid var(--border);">
+      <div style="display:flex;gap:10px;align-items:flex-end;">
+        <textarea id="ai-input" rows="2" class="form-input" placeholder="Posez une question, demandez un résumé, générez un mail..."
+          style="flex:1;resize:none;font-family:var(--font);font-size:14px;"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage();}"></textarea>
+        <button class="btn btn-primary" onclick="sendMessage()" style="padding:12px 18px;">
+          <i class="fa fa-arrow-up"></i>
+        </button>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px;">
+        <span style="font-size:11px;color:var(--text-dim);">Entrée pour envoyer • Maj+Entrée pour saut de ligne</span>
+        <span id="ai-status" style="font-size:11px;color:var(--text-dim);"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANNEAU CONTEXTE MAIL -->
+  <div style="width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:16px;">
+    <div class="card" style="overflow:hidden;">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+        <h3 style="font-size:13px;font-weight:700;"><i class="fa fa-envelope" style="color:var(--primary)"></i> Mail sélectionné</h3>
+      </div>
+      <div style="padding:16px;">
+        <div id="mail-context-info" style="font-size:12px;color:var(--text-muted);">Aucun mail sélectionné.<br>Chargez un mail depuis l'inbox.</div>
+        <input type="hidden" id="ctx-uid" value="">
+        <input type="text" id="ctx-uid-input" class="form-input" placeholder="ID du mail" style="margin-top:10px;font-size:13px;">
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px;width:100%;justify-content:center;" onclick="loadMailContext()">
+          <i class="fa fa-download"></i> Charger ce mail
+        </button>
+      </div>
+    </div>
+
+    <div class="card" style="overflow:hidden;">
+      <div style="padding:14px 16px;border-bottom:1px solid var(--border);">
+        <h3 style="font-size:13px;font-weight:700;"><i class="fa fa-keyboard" style="color:var(--primary)"></i> Raccourcis</h3>
+      </div>
+      <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;">
+        {% set shortcuts = [
+          ('Résumer le mail', 'Ctrl+1'),
+          ('Rédiger réponse', 'Ctrl+2'),
+          ('Détecter spam', 'Ctrl+3'),
+          ('Traduire', 'Ctrl+4'),
+          ('Effacer chat', 'Ctrl+L')
+        ] %}
+        {% for label, key in shortcuts %}
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;color:var(--text-muted);">{{ label }}</span>
+          <kbd style="font-size:11px;padding:2px 7px;background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:4px;">{{ key }}</kbd>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<style>
+.ai-quick-btn{
+  padding:7px 14px;background:rgba(108,99,255,0.1);border:1px solid rgba(108,99,255,0.2);
+  color:var(--primary);border-radius:20px;font-size:12px;cursor:pointer;font-family:var(--font);
+  transition:var(--transition);display:flex;align-items:center;gap:6px;
+}
+.ai-quick-btn:hover{background:rgba(108,99,255,0.25);border-color:var(--primary);transform:translateY(-1px);}
+</style>
+
+<script>
+let mailCtx = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadHistory();
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey||e.metaKey) && e.key==='l') { e.preventDefault(); clearHistory(); }
+    if ((e.ctrlKey||e.metaKey) && e.key==='1') { e.preventDefault(); quickAction('summarize'); }
+    if ((e.ctrlKey||e.metaKey) && e.key==='2') { e.preventDefault(); quickAction('reply'); }
+    if ((e.ctrlKey||e.metaKey) && e.key==='3') { e.preventDefault(); quickAction('spam'); }
+    if ((e.ctrlKey||e.metaKey) && e.key==='4') { e.preventDefault(); quickAction('translate'); }
+  });
+});
+
+async function loadHistory() {
+  const res = await fetch('/api/ai/history');
+  const data = await res.json();
+  if (data.history && data.history.length > 0) {
+    data.history.slice(-20).forEach(h => appendMsg(h.role, escHtml(h.content)));
+  }
+}
+
+async function sendMessage() {
+  const input = document.getElementById('ai-input');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  appendMsg('user', escHtml(msg));
+  appendMsg('assistant', '<span class="ai-typing"><span></span><span></span><span></span></span>');
+  document.getElementById('ai-status').textContent = 'Réflexion...';
+  try {
+    const res = await fetch('/api/ai/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message: msg, mail_context: mailCtx, action: 'chat'})
+    });
+    const data = await res.json();
+    document.getElementById('ai-history').lastElementChild.remove();
+    document.getElementById('ai-status').textContent = '';
+    if (data.success) {
+      appendMsg('assistant', escHtml(data.reply));
+    } else {
+      appendMsg('assistant', `<span style="color:var(--accent2)">❌ ${escHtml(data.error||'Erreur')}</span>`);
+    }
+  } catch(e) {
+    document.getElementById('ai-history').lastElementChild.remove();
+    appendMsg('assistant','<span style="color:var(--accent2)">Erreur réseau</span>');
+    document.getElementById('ai-status').textContent = '';
+  }
+}
+
+async function quickAction(action) {
+  if ((action==='summarize'||action==='reply'||action==='spam'||action==='translate') && !mailCtx) {
+    showToast('Chargez d\'abord un mail via l\'ID à droite', 'error'); return;
+  }
+  appendMsg('user', `<em style="color:var(--text-dim)">Action : ${action}</em>`);
+  appendMsg('assistant','<span class="ai-typing"><span></span><span></span><span></span></span>');
+  document.getElementById('ai-status').textContent = 'Traitement...';
+  try {
+    const res = await fetch('/api/ai/chat', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message:'', action, mail_context: mailCtx})
+    });
+    const data = await res.json();
+    document.getElementById('ai-history').lastElementChild.remove();
+    document.getElementById('ai-status').textContent = '';
+    if (data.success) {
+      const div = document.createElement('div');
+      div.style.cssText='display:flex;flex-direction:column;gap:8px;animation:mailItemIn .3s ease';
+      div.innerHTML=`<div style="max-width:90%;padding:12px 16px;border-radius:16px 16px 16px 4px;background:rgba(255,255,255,0.05);font-size:13px;line-height:1.7;white-space:pre-wrap;">${escHtml(data.reply)}</div><div style="display:flex;gap:6px;">${action==='reply'?`<a href="/compose" class="btn btn-ghost btn-sm" onclick="sessionStorage.setItem('ai_draft','${encodeURIComponent(data.reply)}');return true"><i class='fa fa-pen'></i> Utiliser comme réponse</a>`:''}</div>`;
+      document.getElementById('ai-history').appendChild(div);
+      document.getElementById('ai-history').scrollTop = 999999;
+    } else {
+      appendMsg('assistant', `<span style="color:var(--accent2)">${escHtml(data.error)}</span>`);
+    }
+  } catch(e) {
+    document.getElementById('ai-history').lastElementChild.remove();
+    appendMsg('assistant','<span style="color:var(--accent2)">Erreur réseau</span>');
+    document.getElementById('ai-status').textContent = '';
+  }
+}
+
+async function loadMailContext() {
+  const uid = document.getElementById('ctx-uid-input').value.trim();
+  if (!uid) return showToast('Entrez un ID de mail', 'error');
+  const res = await fetch(`/api/mail/${uid}`);
+  if (!res.ok) return showToast('Mail introuvable', 'error');
+  const mail = await res.json();
+  if (mail.error) return showToast(mail.error, 'error');
+  mailCtx = {from: mail.from, subject: mail.subject, body: mail.body_text || mail.body_html || ''};
+  document.getElementById('mail-context-info').innerHTML = `
+    <strong style="color:var(--text)">De :</strong> ${escHtml(mail.from)}<br>
+    <strong style="color:var(--text)">Objet :</strong> ${escHtml(mail.subject)}<br>
+    <span style="font-size:11px;color:var(--primary);">Contexte chargé ✓</span>`;
+  showToast('Mail chargé comme contexte IA', 'success');
+}
+
+async function clearHistory() {
+  await fetch('/api/ai/clear', {method:'POST'});
+  document.getElementById('ai-history').innerHTML = '<div style="text-align:center;color:var(--text-dim);font-size:13px;padding:40px;">Historique effacé</div>';
+  showToast('Historique effacé', 'info');
+}
+
+function appendMsg(role, html) {
+  const hist = document.getElementById('ai-history');
+  const div = document.createElement('div');
+  div.style.cssText = `display:flex;gap:10px;${role==='user'?'flex-direction:row-reverse':''};animation:mailItemIn .3s ease`;
+  const bubble = document.createElement('div');
+  bubble.style.cssText = `max-width:85%;padding:12px 16px;border-radius:${role==='user'?'16px 16px 4px 16px':'16px 16px 16px 4px'};background:${role==='user'?'linear-gradient(135deg,var(--primary),var(--accent2))':'rgba(255,255,255,0.05)'};font-size:13px;line-height:1.7;white-space:pre-wrap;`;
+  bubble.innerHTML = html;
+  div.appendChild(bubble);
+  hist.appendChild(div);
+  hist.scrollTop = hist.scrollHeight;
+}
+
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+</script>
+{% endif %}
+{% endblock %}
