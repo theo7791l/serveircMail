@@ -1,527 +1,524 @@
 {% extends 'base.html' %}
-{% block title %}Boite de réception — {{ site_name }}{% endblock %}
+{% block title %}Boîte de réception — {{ site_name }}{% endblock %}
 {% block page_title %}<i class="fa fa-inbox" style="color:var(--primary)"></i> Boîte de réception{% endblock %}
 {% block topbar_actions %}
-<button class="topbar-btn" onclick="toggleAIPanel()" title="Awlor AI" id="ai-toggle-btn" style="position:relative">
-  <i class="fa fa-robot"></i>
-  <span style="position:absolute;top:4px;right:4px;width:7px;height:7px;background:var(--accent3);border-radius:50%;border:1.5px solid var(--bg-dark);"></span>
-</button>
 <button class="topbar-btn" onclick="loadMails()" title="Rafraîchir"><i class="fa fa-rotate-right"></i></button>
-<button class="topbar-btn" onclick="toggleFocusMode()" title="Focus Mode (F)" id="focus-btn"><i class="fa fa-expand"></i></button>
+<button class="topbar-btn" id="focus-btn" onclick="toggleFocusMode()" title="Focus Mode (F)"><i class="fa fa-expand"></i></button>
+{% if ai_enabled == '1' %}
+<a href="/ai" class="topbar-btn" title="IA Awlor"><i class="fa fa-robot" style="color:var(--primary)"></i></a>
+{% endif %}
 {% endblock %}
+
 {% block content %}
 <!-- COMMAND PALETTE -->
-<div id="cmd-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(8px);z-index:9000;align-items:flex-start;justify-content:center;padding-top:15vh;" onclick="closeCmdPalette()">
-  <div style="width:600px;max-width:90vw;background:rgba(12,12,28,0.98);border:1px solid var(--border-glow);border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.7);" onclick="event.stopPropagation()">
-    <div style="display:flex;align-items:center;gap:12px;padding:18px 20px;border-bottom:1px solid var(--border);">
-      <i class="fa fa-magnifying-glass" style="color:var(--primary);font-size:18px;"></i>
-      <input id="cmd-input" type="text" placeholder="Taper une commande ou chercher... (N=nouveau, R=répondre, F=focus, /=recherche)" autocomplete="off"
-        style="flex:1;background:none;border:none;outline:none;font-size:16px;color:var(--text);font-family:var(--font);" oninput="filterCmds()" onkeydown="cmdKey(event)">
-      <kbd style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:11px;color:var(--text-muted);">ESC</kbd>
+<div id="cmd-overlay" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);" onclick="closeCmd()">
+  <div id="cmd-box" style="position:absolute;top:80px;left:50%;transform:translateX(-50%);width:min(640px,94vw);background:rgba(12,12,28,0.98);border:1px solid var(--border-glow);border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.7);" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border);">
+      <i class="fa fa-magnifying-glass" style="color:var(--primary);font-size:18px"></i>
+      <input id="cmd-input" type="text" placeholder="Tapez une action ou une recherche..." style="flex:1;background:none;border:none;outline:none;font-size:16px;color:var(--text);font-family:var(--font)" oninput="cmdSearch(this.value)" onkeydown="cmdKey(event)">
+      <kbd style="font-size:11px;padding:2px 7px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;color:var(--text-muted)">ESC</kbd>
     </div>
-    <div id="cmd-results" style="max-height:340px;overflow-y:auto;"></div>
+    <div id="cmd-results" style="max-height:380px;overflow-y:auto;padding:8px;"></div>
   </div>
 </div>
 
-<!-- FOCUS MODE OVERLAY -->
-<div id="focus-overlay" style="display:none;position:fixed;inset:0;background:#000;z-index:8000;padding:60px;overflow-y:auto;">
-  <button onclick="toggleFocusMode()" style="position:fixed;top:20px;right:24px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);color:#fff;padding:8px 16px;border-radius:8px;cursor:pointer;font-family:Georgia,serif;font-size:13px;"><i class="fa fa-compress"></i> Quitter le focus</button>
-  <div id="focus-content" style="max-width:720px;margin:0 auto;font-family:Georgia,'Times New Roman',serif;font-size:18px;line-height:1.9;color:#e8e8e0;"></div>
+<!-- SNOOZE MODAL -->
+<div id="snooze-modal" style="display:none;position:fixed;inset:0;z-index:8000;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
+  <div style="background:rgba(12,12,28,0.98);border:1px solid var(--border-glow);border-radius:var(--radius-lg);padding:28px;width:min(420px,90vw);box-shadow:0 24px 80px rgba(0,0,0,0.7);animation:modalIn .3s ease;">
+    <h3 style="font-size:16px;font-weight:700;margin-bottom:20px;"><i class="fa fa-clock" style="color:var(--primary)"></i> Reporter ce mail</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+      <button class="btn btn-ghost btn-sm" onclick="setSnooze(1,'hour')"><i class="fa fa-clock"></i> Dans 1 heure</button>
+      <button class="btn btn-ghost btn-sm" onclick="setSnooze(3,'hour')"><i class="fa fa-clock"></i> Dans 3 heures</button>
+      <button class="btn btn-ghost btn-sm" onclick="setSnooze(1,'day')"><i class="fa fa-sun"></i> Demain matin</button>
+      <button class="btn btn-ghost btn-sm" onclick="setSnooze(3,'day')"><i class="fa fa-calendar"></i> Dans 3 jours</button>
+      <button class="btn btn-ghost btn-sm" onclick="setSnooze(7,'day')"><i class="fa fa-calendar-week"></i> Dans 1 semaine</button>
+      <button class="btn btn-ghost btn-sm" onclick="setSnooze(0,'custom')"><i class="fa fa-pen"></i> Date custom</button>
+    </div>
+    <input type="datetime-local" id="snooze-custom" style="width:100%;margin-bottom:16px;display:none" class="form-input">
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-ghost btn-sm" onclick="closeSnooze()">Annuler</button>
+      <button class="btn btn-primary btn-sm" onclick="confirmSnooze()"><i class="fa fa-check"></i> Reporter</button>
+    </div>
+  </div>
 </div>
 
-<div style="display:flex;gap:0;height:calc(100vh - 64px - 56px);position:relative;">
+<!-- FOLLOW-UP ALERTS -->
+<div id="followup-bar" style="display:none;margin-bottom:16px;background:linear-gradient(135deg,rgba(255,101,132,0.12),rgba(108,99,255,0.08));border:1px solid rgba(255,101,132,0.3);border-radius:var(--radius);padding:14px 20px;">
+  <div style="display:flex;align-items:center;gap:12px;">
+    <i class="fa fa-bell" style="color:var(--accent2)"></i>
+    <div style="flex:1"><span id="followup-text" style="font-size:13px;font-weight:600;"></span></div>
+    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('followup-bar').style.display='none'"><i class="fa fa-xmark"></i></button>
+  </div>
+</div>
 
-  <!-- SIDEBAR DOSSIERS -->
-  <div style="width:220px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;background:rgba(10,10,31,0.5);">
-    <div style="padding:16px 12px;">
-      <a href="/compose" class="btn btn-primary" style="width:100%;justify-content:center;gap:8px;" onclick="addRipple(event)">
-        <i class="fa fa-pen-to-square"></i> Nouveau mail
-      </a>
-    </div>
-    <div style="padding:0 8px;flex:1;overflow-y:auto;">
-      <div style="font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);padding:8px 8px 6px;">Dossiers</div>
-      <div id="folderList"></div>
-    </div>
-    <div style="padding:12px;border-top:1px solid var(--border);">
-      <div style="font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);padding:0 4px 8px;">Activité</div>
-      <canvas id="heatmapCanvas" width="196" height="48" style="width:100%;border-radius:8px;opacity:0.8;"></canvas>
+<div style="display:flex;gap:20px;height:calc(100vh - 64px - 56px - 32px);">
+
+  <!-- SIDEBAR GAUCHE : dossiers + heatmap -->
+  <div style="width:220px;flex-shrink:0;display:flex;flex-direction:column;gap:16px;">
+    <div class="card" style="flex:1;overflow:hidden;">
+      <div class="card-body" style="padding:16px 12px;height:100%;display:flex;flex-direction:column;">
+        <a href="/compose" class="btn btn-primary" style="width:100%;justify-content:center;margin-bottom:14px;font-size:13px;padding:9px 14px;">
+          <i class="fa fa-pen-to-square"></i> Nouveau mail
+        </a>
+        <div style="font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);padding:0 4px 8px;">Dossiers</div>
+        <div id="folderList" style="flex:1;overflow-y:auto;"></div>
+        <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px;">
+          <div style="font-size:10px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);padding:0 4px 6px;">Activité (24h)</div>
+          <canvas id="heatmap-canvas" height="48" style="width:100%;border-radius:6px;"></canvas>
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- MAIL LIST -->
-  <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;" id="mail-list-pane">
+  <!-- LISTE DES MAILS -->
+  <div class="card" style="flex:1;display:flex;flex-direction:column;overflow:hidden;" id="mail-list-panel">
     <!-- Toolbar -->
-    <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <input type="checkbox" id="selectAll" onchange="toggleSelectAll()" style="width:16px;height:16px;accent-color:var(--primary);cursor:pointer;" title="Tout sélectionner">
-        <h2 id="folderTitle" style="font-size:14px;font-weight:700;white-space:nowrap;"><i class="fa fa-inbox" style="color:var(--primary)"></i> Inbox</h2>
-        <span id="unreadBadge" class="nav-badge" style="display:none;"></span>
-      </div>
-      <div class="search-bar" style="flex:1;max-width:280px;">
-        <input type="text" placeholder="Rechercher... (/)" id="searchInput" oninput="renderMails(currentMails)" />
-        <i class="fa fa-magnifying-glass search-icon"></i>
-      </div>
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap;">
+      <input type="checkbox" id="select-all" onchange="toggleSelectAll(this.checked)" style="width:16px;height:16px;accent-color:var(--primary);cursor:pointer;">
+      <h2 id="folderTitle" style="font-size:15px;font-weight:700;flex:1;"><i class="fa fa-inbox" style="color:var(--primary)"></i> Boîte de réception</h2>
       <!-- Filtres -->
       <div style="display:flex;gap:6px;">
-        <button class="btn btn-ghost btn-sm filter-btn active" data-filter="all" onclick="setFilter('all',this)">Tous</button>
-        <button class="btn btn-ghost btn-sm filter-btn" data-filter="unread" onclick="setFilter('unread',this)">Non lus</button>
-        <button class="btn btn-ghost btn-sm filter-btn" data-filter="starred" onclick="setFilter('starred',this)"><i class="fa fa-star"></i></button>
+        <button class="filter-btn active" data-f="" onclick="setFilter('',this)">Tous</button>
+        <button class="filter-btn" data-f="unread" onclick="setFilter('unread',this)">Non lus</button>
+        <button class="filter-btn" data-f="starred" onclick="setFilter('starred',this)"><i class="fa fa-star"></i></button>
       </div>
-      <!-- Actions de masse -->
+      <!-- Actions groupées (visibles si sélection) -->
       <div id="bulk-actions" style="display:none;gap:6px;display:none;">
-        <button class="btn btn-ghost btn-sm" onclick="bulkMarkRead(true)"><i class="fa fa-eye"></i> Lu</button>
-        <button class="btn btn-ghost btn-sm" onclick="bulkMarkRead(false)"><i class="fa fa-eye-slash"></i> Non lu</button>
-        <button class="btn btn-danger btn-sm" onclick="bulkDelete()"><i class="fa fa-trash"></i></button>
+        <button class="btn btn-ghost btn-sm" onclick="bulkAction('mark_read')"><i class="fa fa-envelope-open"></i></button>
+        <button class="btn btn-ghost btn-sm" onclick="bulkAction('mark_unread')"><i class="fa fa-envelope"></i></button>
+        <button class="btn btn-ghost btn-sm" onclick="bulkAction('star')"><i class="fa fa-star"></i></button>
+        <button class="btn btn-ghost btn-sm" onclick="bulkAction('trash')" style="color:var(--accent2)"><i class="fa fa-trash"></i></button>
+      </div>
+      <!-- Search -->
+      <div class="search-bar" style="max-width:220px;">
+        <input type="text" placeholder="Rechercher... (/)" id="searchInput" />
+        <i class="fa fa-magnifying-glass search-icon"></i>
       </div>
     </div>
-
+    <!-- Mail list -->
     <div id="mailList" style="flex:1;overflow-y:auto;"></div>
     <div id="pagination" style="border-top:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;justify-content:center;gap:12px;"></div>
   </div>
 
-  <!-- SPLIT VIEW PREVIEW -->
-  <div id="split-pane" style="width:0;flex-shrink:0;border-left:1px solid var(--border);overflow-y:auto;transition:width 0.3s cubic-bezier(0.4,0,0.2,1);background:rgba(8,8,20,0.8);">
-    <div id="split-content" style="padding:24px;min-height:100%;"></div>
-  </div>
-
-  <!-- AI PANEL -->
-  <div id="ai-panel" style="width:0;flex-shrink:0;border-left:1px solid var(--border);overflow:hidden;transition:width 0.35s cubic-bezier(0.4,0,0.2,1);background:linear-gradient(180deg,rgba(8,8,24,0.97) 0%,rgba(10,6,28,0.97) 100%);display:flex;flex-direction:column;">
-    <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0;">
-      <div style="width:32px;height:32px;background:linear-gradient(135deg,var(--primary),var(--accent));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;"><i class="fa fa-robot"></i></div>
-      <div style="flex:1;"><div style="font-size:14px;font-weight:700;">Awlor AI</div><div style="font-size:11px;color:var(--accent3);">Groq · Llama 3.3 70B</div></div>
-      <button onclick="clearAIHistory()" title="Effacer l'historique" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px;"><i class="fa fa-trash-can"></i></button>
-    </div>
-    <div id="ai-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;"></div>
-    <!-- Quick actions -->
-    <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0;">
-      <button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="aiQuick('Résume les derniers mails non lus')">Résumer</button>
-      <button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="aiQuick('Détecte les spams dans ma boîte')">Anti-spam</button>
-      <button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="aiQuick('Quelles actions dois-je faire aujourd\'hui ?')">Actions</button>
-      <button class="btn btn-ghost btn-sm" style="font-size:11px;" onclick="aiQuick('Suggère des règles de tri pour mes mails')">Tri auto</button>
-    </div>
-    <div style="padding:12px 16px;border-top:1px solid var(--border);flex-shrink:0;">
-      <div style="display:flex;gap:8px;align-items:flex-end;">
-        <textarea id="ai-input" placeholder="Posez une question, demandez de rédiger un mail..." rows="2"
-          style="flex:1;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:13px;padding:10px 14px;resize:none;outline:none;font-family:var(--font);transition:var(--transition);"
-          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAI();}"
-          onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border)'"></textarea>
-        <button onclick="sendAI()" class="btn btn-primary btn-icon" style="flex-shrink:0;width:40px;height:40px;"><i class="fa fa-paper-plane"></i></button>
+  <!-- SPLIT VIEW : aperçu rapide -->
+  <div id="split-panel" style="width:0;transition:width 0.35s cubic-bezier(0.4,0,0.2,1);overflow:hidden;flex-shrink:0;">
+    <div class="card" style="height:100%;display:flex;flex-direction:column;min-width:380px;">
+      <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);">
+        <span id="preview-title" style="flex:1;font-size:14px;font-weight:600;color:var(--text);">Aperçu</span>
+        <button class="topbar-btn" onclick="closeSplit()" style="width:30px;height:30px;"><i class="fa fa-xmark"></i></button>
+      </div>
+      <div id="preview-body" style="flex:1;overflow-y:auto;padding:16px;font-size:13px;color:var(--text-muted);"></div>
+      <div style="padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;">
+        <a id="preview-open" href="#" class="btn btn-primary btn-sm" style="flex:1;justify-content:center;"><i class="fa fa-expand"></i> Ouvrir</a>
+        <button class="btn btn-ghost btn-sm" id="preview-star-btn" onclick="previewStar()"><i class="fa fa-star"></i></button>
+        <button class="btn btn-ghost btn-sm" onclick="previewReply()"><i class="fa fa-reply"></i></button>
+        <button class="btn btn-ghost btn-sm" onclick="previewSnooze()" title="Reporter"><i class="fa fa-clock"></i></button>
       </div>
     </div>
   </div>
+
 </div>
+
+<style>
+.filter-btn {
+  padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:transparent;
+  color:var(--text-muted);font-size:12px;cursor:pointer;transition:var(--transition);font-family:var(--font);
+}
+.filter-btn:hover,.filter-btn.active{
+  background:linear-gradient(135deg,rgba(108,99,255,0.2),rgba(62,198,224,0.1));
+  border-color:var(--border-glow);color:var(--text);
+}
+.mail-cb{width:15px;height:15px;accent-color:var(--primary);cursor:pointer;flex-shrink:0;}
+.mail-item{cursor:pointer;}
+.mail-item.selected{background:rgba(108,99,255,0.08)!important;}
+.mail-star{background:none;border:none;cursor:pointer;font-size:14px;color:var(--text-dim);padding:4px;border-radius:4px;transition:var(--transition);flex-shrink:0;}
+.mail-star:hover,.mail-star.active{color:var(--gold);}
+.skeleton-row{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.04);}
+/* Focus mode */
+body.focus-mode .sidebar,.focus-mode .topbar,.focus-mode #mail-list-panel,.focus-mode .glow-orb{display:none!important;}
+body.focus-mode .main-content{margin-left:0;}
+body.focus-mode #split-panel{width:100%!important;min-width:100vw;}
+body.focus-mode #split-panel .card{border:none;background:#000;border-radius:0;}
+body.focus-mode #preview-body{font-family:'Georgia',serif;font-size:16px;line-height:1.9;color:#e8e8e8;max-width:720px;margin:0 auto;padding:40px 20px;}
+</style>
 
 <script>
 let currentFolder = '{{ folder }}';
 let currentPage = {{ page }};
 let totalPages = 1;
-let currentMails = [];
-let selectedUids = new Set();
-let starredUids = new Set();
-let activeFilter = 'all';
-let aiPanelOpen = false;
-let splitPaneOpen = false;
-let focusMode = false;
-let aiLoading = false;
-const folderIcons = { 'INBOX':'fa-inbox','Sent':'fa-paper-plane','Drafts':'fa-file-lines','Trash':'fa-trash','Spam':'fa-shield-virus','Archive':'fa-box-archive','Snoozed':'fa-clock','Starred':'fa-star' };
+let currentFilter = '';
+let selectedIds = new Set();
+let snoozingMailId = null;
+let splitMailId = null;
+const folderIcons = {
+  'INBOX':'fa-inbox','Sent':'fa-paper-plane','Drafts':'fa-file-lines',
+  'Trash':'fa-trash','Spam':'fa-shield-virus','Archive':'fa-box-archive',
+  'Snoozed':'fa-clock','Starred':'fa-star'
+};
 
 document.addEventListener('DOMContentLoaded', () => {
-  loadFolders();
-  loadMails();
-  loadStats();
-  loadStarred();
-  loadAIHistory();
-  drawHeatmap();
+  loadFolders(); loadMails(); loadStats();
+  loadHeatmap(); checkFollowup();
 });
 
 // ===== KEYBOARD SHORTCUTS =====
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  if (e.ctrlKey && e.key === 'k') { e.preventDefault(); openCmdPalette(); return; }
-  if (e.key === 'n' || e.key === 'N') { window.location.href = '/compose'; return; }
-  if (e.key === 'f' || e.key === 'F') { toggleFocusMode(); return; }
-  if (e.key === '/') { e.preventDefault(); document.getElementById('searchInput').focus(); return; }
-  if (e.key === 'Escape') { closeCmdPalette(); closeSplitPane(); return; }
+  if (e.key === 'n' || e.key === 'N') window.location.href='/compose';
+  if (e.key === '/' ) { e.preventDefault(); document.getElementById('searchInput').focus(); }
+  if (e.key === 'k' && (e.ctrlKey||e.metaKey)) { e.preventDefault(); openCmd(); }
+  if (e.key === 'f' || e.key === 'F') toggleFocusMode();
+  if (e.key === 'Escape') { closeCmd(); closeSnooze(); closeSplit(); }
+  if (e.key === 'r' && e.ctrlKey) { e.preventDefault(); loadMails(); }
 });
-
-// ===== COMMAND PALETTE =====
-const COMMANDS = [
-  { label: 'Nouveau mail', icon: 'fa-pen-to-square', action: () => window.location.href='/compose' },
-  { label: 'Aller dans la boîte de réception', icon: 'fa-inbox', action: () => switchFolder('INBOX', null) },
-  { label: 'Aller dans Envoyés', icon: 'fa-paper-plane', action: () => switchFolder('Sent', null) },
-  { label: 'Aller dans Corbeille', icon: 'fa-trash', action: () => switchFolder('Trash', null) },
-  { label: 'Aller dans Spam', icon: 'fa-shield-virus', action: () => switchFolder('Spam', null) },
-  { label: 'Marquer tous comme lus', icon: 'fa-eye', action: () => bulkMarkRead(true) },
-  { label: 'Ouvrir Awlor AI', icon: 'fa-robot', action: () => { if(!aiPanelOpen) toggleAIPanel(); } },
-  { label: 'Focus Mode', icon: 'fa-expand', action: () => toggleFocusMode() },
-  { label: 'Profil', icon: 'fa-user', action: () => window.location.href='/profile' },
-  { label: 'Déconnexion', icon: 'fa-right-from-bracket', action: () => window.location.href='/logout' },
-];
-
-function openCmdPalette() {
-  const el = document.getElementById('cmd-overlay');
-  el.style.display = 'flex';
-  document.getElementById('cmd-input').value = '';
-  filterCmds();
-  setTimeout(() => document.getElementById('cmd-input').focus(), 50);
-}
-function closeCmdPalette() { document.getElementById('cmd-overlay').style.display = 'none'; }
-function filterCmds() {
-  const q = document.getElementById('cmd-input').value.toLowerCase();
-  const list = document.getElementById('cmd-results');
-  const filtered = COMMANDS.filter(c => c.label.toLowerCase().includes(q));
-  list.innerHTML = filtered.map((c,i) => `
-    <div class="cmd-item" style="display:flex;align-items:center;gap:14px;padding:13px 20px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.15s;" 
-      onmouseenter="this.style.background='var(--bg-card)'" onmouseleave="this.style.background='transparent'" onclick="runCmd(${i}, filtered_cmds)">
-      <i class="fa ${c.icon}" style="color:var(--primary);width:16px;"></i>
-      <span style="font-size:14px;">${c.label}</span>
-    </div>`).join('');
-  window.__filtered_cmds = filtered;
-}
-function runCmd(idx) {
-  const cmds = window.__filtered_cmds;
-  if (cmds && cmds[idx]) { closeCmdPalette(); cmds[idx].action(); }
-}
-function cmdKey(e) {
-  if (e.key === 'Escape') { closeCmdPalette(); }
-  if (e.key === 'Enter') {
-    const items = document.querySelectorAll('#cmd-results .cmd-item');
-    if (items.length > 0) { closeCmdPalette(); (window.__filtered_cmds || [])[0]?.action(); }
-  }
-}
 
 // ===== FOLDERS =====
 async function loadFolders() {
   const res = await fetch('/api/folders');
   const data = await res.json();
-  const colorsRes = await fetch('/api/folder-colors');
-  const colorsData = await colorsRes.json();
-  const colors = colorsData.colors || {};
+  const colRes = await fetch('/api/folder-colors');
+  const colData = await colRes.json();
+  const colors = colData.colors || {};
   const nav = document.getElementById('folderList');
   nav.innerHTML = '';
   data.folders.forEach(f => {
     const a = document.createElement('a');
-    const color = colors[f] || null;
     a.className = 'nav-item' + (f === currentFolder ? ' active' : '');
     a.href = '#';
-    a.style.cssText = color ? `--folder-accent:${color};` : '';
     const icon = folderIcons[f] || 'fa-folder';
-    a.innerHTML = `<i class="fa ${icon} nav-icon" style="${color?`color:${color}`:''}" ></i><span style="flex:1;">${f}</span><span class="folder-badge-${f}" style="font-size:10px;color:var(--text-dim);"></span>`;
+    const color = colors[f];
+    const style = color ? `style="border-left:3px solid ${color};"` : '';
+    a.innerHTML = `<i class="fa ${icon} nav-icon"></i><span style="flex:1">${f}</span><span class="folder-badge-${f}" style="font-size:10px;color:var(--text-dim)"></span>`;
+    if (style) a.setAttribute('style', a.getAttribute('style')||'' + (color ? `border-left:3px solid ${color};` : ''));
     a.onclick = e => { e.preventDefault(); switchFolder(f, a); };
     nav.appendChild(a);
-  });
-  // Load folder counts
-  data.folders.forEach(async f => {
-    try {
-      const r2 = await fetch(`/api/stats?folder=${encodeURIComponent(f)}`);
-      const d2 = await r2.json();
-      const badge = document.querySelector(`.folder-badge-${f}`);
-      if (badge && d2.unseen > 0) badge.textContent = d2.unseen;
-    } catch {}
   });
 }
 
 async function switchFolder(folder, el) {
-  currentFolder = folder; currentPage = 1; selectedUids.clear();
+  currentFolder = folder; currentPage = 1; selectedIds.clear();
   document.querySelectorAll('#folderList .nav-item').forEach(i => i.classList.remove('active'));
-  if (el) el.classList.add('active');
-  const title = document.getElementById('folderTitle');
-  title.innerHTML = `<i class="fa ${folderIcons[folder]||'fa-folder'}" style="color:var(--primary)"></i> ${folder}`;
-  closeSplitPane();
+  el.classList.add('active');
+  document.getElementById('folderTitle').innerHTML = `<i class="fa ${folderIcons[folder]||'fa-folder'}" style="color:var(--primary)"></i> ${folder}`;
   loadMails();
 }
 
-// ===== MAILS =====
-async function loadMails() {
-  showSkeleton();
-  try {
-    const res = await fetch(`/api/mails?folder=${encodeURIComponent(currentFolder)}&page=${currentPage}&per_page=20`);
-    const data = await res.json();
-    totalPages = data.pages;
-    currentMails = data.mails;
-    renderMails(currentMails);
-    renderPagination(data.page, data.pages, data.total);
-  } catch(e) {
-    document.getElementById('mailList').innerHTML = `<div style="padding:40px;text-align:center;color:var(--accent2);"><i class="fa fa-circle-exclamation" style="font-size:32px;margin-bottom:12px;"></i><p>Erreur de chargement</p></div>`;
-  }
+// ===== FILTER =====
+function setFilter(f, btn) {
+  currentFilter = f; currentPage = 1;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loadMails();
 }
 
-function showSkeleton() {
+// ===== LOAD MAILS =====
+async function loadMails() {
   const list = document.getElementById('mailList');
-  list.innerHTML = Array(6).fill(0).map(() => `
-    <div style="display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--border);">
-      <div class="skeleton" style="width:16px;height:16px;border-radius:4px;"></div>
-      <div class="skeleton" style="width:32px;height:32px;border-radius:50%;flex-shrink:0;"></div>
-      <div style="flex:1;">
-        <div class="skeleton" style="width:40%;height:12px;margin-bottom:8px;"></div>
-        <div class="skeleton" style="width:70%;height:10px;"></div>
-      </div>
-      <div class="skeleton" style="width:50px;height:10px;"></div>
-    </div>`).join('');
+  list.innerHTML = renderSkeletons(8);
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const res = await fetch(`/api/mails?folder=${encodeURIComponent(currentFolder)}&page=${currentPage}&per_page=20&filter=${currentFilter}`);
+  const data = await res.json();
+  totalPages = data.pages;
+  let mails = data.mails;
+  if (search) mails = mails.filter(m => m.subject.toLowerCase().includes(search) || m.from.toLowerCase().includes(search));
+  renderMails(mails);
+  renderPagination(data.page, data.pages, data.total);
+}
+
+function renderSkeletons(n) {
+  let h = '';
+  for (let i=0;i<n;i++) h+=`<div class="skeleton-row"><div class="skeleton" style="width:8px;height:8px;border-radius:50%"></div><div class="skeleton" style="width:32px;height:32px;border-radius:50%"></div><div style="flex:1;display:flex;flex-direction:column;gap:6px"><div class="skeleton" style="height:12px;width:40%"></div><div class="skeleton" style="height:11px;width:70%"></div></div><div class="skeleton" style="width:40px;height:10px"></div></div>`;
+  return h;
 }
 
 function renderMails(mails) {
   const list = document.getElementById('mailList');
-  const search = document.getElementById('searchInput').value.toLowerCase();
-  let filtered = mails;
-  if (search) filtered = mails.filter(m => m.subject.toLowerCase().includes(search) || m.from.toLowerCase().includes(search));
-  if (activeFilter === 'unread') filtered = filtered.filter(m => !m.seen);
-  if (activeFilter === 'starred') filtered = filtered.filter(m => starredUids.has(m.uid));
-  if (!filtered.length) {
-    list.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px;gap:16px;color:var(--text-muted);"><i class="fa fa-envelope-open" style="font-size:48px;opacity:0.15;"></i><p style="font-size:14px;">Aucun mail ici</p></div>`;
+  if (!mails.length) {
+    list.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 20px;gap:16px;color:var(--text-muted);"><i class="fa fa-envelope-open" style="font-size:48px;opacity:0.2;"></i><p style="font-size:14px;">Aucun mail dans ce dossier</p></div>`;
     return;
   }
   list.innerHTML = '';
-  filtered.forEach((m, i) => {
-    const isStarred = starredUids.has(m.uid);
-    const isSelected = selectedUids.has(m.uid);
+  mails.forEach((m, i) => {
     const item = document.createElement('div');
-    item.className = 'mail-item' + (m.seen ? '' : ' unread') + (isSelected ? ' selected' : '');
-    item.style.cssText = `animation-delay:${i*30}ms;${isSelected?'background:rgba(108,99,255,0.12);border-left:3px solid var(--primary);':''}cursor:pointer;`;
+    item.className = 'mail-item' + (m.seen ? '' : ' unread') + (selectedIds.has(m.uid) ? ' selected' : '');
     item.dataset.uid = m.uid;
+    item.style.cssText = `display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.04);transition:var(--transition);position:relative;animation:mailItemIn 0.4s ease both;animation-delay:${i*30}ms`;
     item.innerHTML = `
-      <input type="checkbox" class="mail-checkbox" style="width:15px;height:15px;accent-color:var(--primary);flex-shrink:0;cursor:pointer;" ${isSelected?'checked':''}
-        onclick="event.stopPropagation();toggleSelect('${m.uid}')">
-      <button class="star-btn" style="background:none;border:none;cursor:pointer;font-size:16px;flex-shrink:0;padding:0 2px;transition:transform 0.2s;" 
-        onclick="event.stopPropagation();toggleStar('${m.uid}','${currentFolder}',this)" title="${isStarred?'Retirer des favoris':'Ajouter aux favoris'}">
-        <i class="fa${isStarred?'':'-regular'} fa-star" style="color:${isStarred?'var(--gold)':'var(--text-dim)'};"></i>
-      </button>
-      ${!m.seen ? '<span class="mail-unread-dot"></span>' : '<span style="width:8px;flex-shrink:0;"></span>'}
-      <div class="avatar avatar-sm" style="background:linear-gradient(135deg,var(--primary),var(--accent2));flex-shrink:0;">${esc(m.from)[0].toUpperCase()}</div>
-      <div class="mail-info" style="flex:1;min-width:0;" onclick="openMail(event,'${m.uid}','${m.from.replace(/'/g,\"\\'\")}')"> 
-        <div class="mail-from">${esc(m.from)}</div>
-        <div class="mail-subject">${esc(m.subject)}</div>
+      <input type="checkbox" class="mail-cb" ${selectedIds.has(m.uid)?'checked':''} onchange="toggleSelect('${m.uid}',this)" onclick="e=>{e.stopPropagation()}">
+      ${!m.seen ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--primary);box-shadow:0 0 8px var(--primary);flex-shrink:0;"></span>' : '<span style="width:8px;flex-shrink:0;"></span>'}
+      <div class="avatar avatar-sm" style="background:linear-gradient(135deg,var(--primary),var(--accent2));flex-shrink:0;cursor:pointer" onclick="openSplit('${m.uid}',event)">${esc(m.from)[0].toUpperCase()}</div>
+      <div style="flex:1;min-width:0;cursor:pointer" onclick="openSplit('${m.uid}',event)">
+        <div style="font-size:13px;font-weight:${m.seen?'500':'700'};color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(m.from)}</div>
+        <div style="font-size:12px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(m.subject)}</div>
       </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
-        <span class="mail-date">${fmtDate(m.date)}</span>
-        <div style="display:flex;gap:4px;">
-          <button title="Snooze" onclick="event.stopPropagation();openSnooze('${m.uid}')" style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:12px;opacity:0;transition:opacity 0.2s;" class="mail-action-btn"><i class="fa fa-clock"></i></button>
-          <button title="Aperçu rapide" onclick="event.stopPropagation();openSplitPreview('${m.uid}','${m.from.replace(/'/g,\"\\'\")}')"
-            style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:12px;opacity:0;transition:opacity 0.2s;" class="mail-action-btn"><i class="fa fa-eye"></i></button>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+        <button class="mail-star ${m.starred?'active':''}" onclick="toggleStar('${m.uid}',this)" title="Étoiler"><i class="fa ${m.starred?'fa-solid':'fa-regular'} fa-star"></i></button>
+        <span style="font-size:11px;color:var(--text-dim);">${fmtDate(m.date)}</span>
+        <div style="position:relative">
+          <button style="background:none;border:none;cursor:pointer;color:var(--text-dim);padding:4px;font-size:13px;" onclick="mailMenu('${m.uid}',event)" title="Plus"><i class="fa fa-ellipsis-v"></i></button>
         </div>
       </div>`;
-    item.onmouseenter = () => item.querySelectorAll('.mail-action-btn').forEach(b => b.style.opacity='1');
-    item.onmouseleave = () => item.querySelectorAll('.mail-action-btn').forEach(b => b.style.opacity='0');
+    item.querySelector('.avatar-sm').addEventListener('dblclick', () => window.location.href=`/mail/${m.uid}?folder=${encodeURIComponent(currentFolder)}`);
     list.appendChild(item);
   });
+  updateBulkBar();
 }
 
-function openMail(e, uid, from) {
-  if (e.target.closest('.mail-checkbox') || e.target.closest('.star-btn')) return;
-  window.location.href = `/mail/${uid}?folder=${encodeURIComponent(currentFolder)}`;
+// ===== MAIL MENU =====
+function mailMenu(uid, e) {
+  e.stopPropagation();
+  document.querySelectorAll('.mail-ctx-menu').forEach(m=>m.remove());
+  const menu = document.createElement('div');
+  menu.className = 'mail-ctx-menu';
+  menu.style.cssText = `position:fixed;z-index:5000;background:rgba(12,12,28,0.98);border:1px solid var(--border-glow);border-radius:var(--radius);padding:6px;min-width:180px;box-shadow:0 12px 40px rgba(0,0,0,0.6);animation:modalIn .15s ease;`;
+  menu.style.top = (e.clientY+4)+'px';
+  menu.style.left = Math.min(e.clientX, window.innerWidth-200)+'px';
+  const items = [
+    {icon:'fa-envelope-open',label:'Marquer lu',fn:`bulkAction('mark_read',['${uid}'])`},
+    {icon:'fa-reply',label:'Répondre',fn:`window.location.href='/compose?reply_to=${uid}'`},
+    {icon:'fa-share',label:'Transférer',fn:`window.location.href='/compose?forward=${uid}'`},
+    {icon:'fa-clock',label:'Reporter (snooze)',fn:`openSnoozeFor('${uid}')`},
+    {icon:'fa-bell',label:'Follow-up',fn:`setFollowup('${uid}')`},
+    {icon:'fa-box-archive',label:'Archiver',fn:`moveMailTo('${uid}','Archive')`},
+    {icon:'fa-shield-virus',label:'Spam',fn:`moveMailTo('${uid}','Spam')`,color:'var(--accent2)'},
+    {icon:'fa-trash',label:'Supprimer',fn:`moveMailTo('${uid}','Trash')`,color:'var(--accent2)'},
+  ];
+  items.forEach(it=>{
+    const btn=document.createElement('button');
+    btn.style.cssText=`display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;background:none;border:none;cursor:pointer;color:${it.color||'var(--text-muted)'};font-size:13px;border-radius:6px;font-family:var(--font);transition:var(--transition);`;
+    btn.innerHTML=`<i class="fa ${it.icon}" style="width:16px"></i>${it.label}`;
+    btn.onmouseenter=()=>btn.style.background='var(--bg-card-hover)';
+    btn.onmouseleave=()=>btn.style.background='none';
+    btn.onclick=()=>{eval(it.fn);menu.remove();};
+    menu.appendChild(btn);
+  });
+  document.body.appendChild(menu);
+  setTimeout(()=>document.addEventListener('click',()=>menu.remove(),{once:true}),10);
+}
+
+async function moveMailTo(uid, folder) {
+  await fetch(`/api/mail/${uid}/move`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder})})
+  showToast(`Déplacé vers ${folder}`, 'info'); loadMails();
+}
+
+async function setFollowup(uid) {
+  await fetch(`/api/mail/${uid}/followup`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({days:3})});
+  showToast('Follow-up dans 3 jours', 'success');
 }
 
 // ===== STAR =====
-async function toggleStar(uid, folder, btn) {
-  const res = await fetch('/api/mails/star', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({uid,folder}) });
+async function toggleStar(uid, btn) {
+  const res = await fetch(`/api/mail/${uid}/star`, {method:'POST'});
   const data = await res.json();
-  if (data.starred) {
-    starredUids.add(uid);
-    btn.innerHTML = '<i class="fa fa-star" style="color:var(--gold);"></i>';
-    btn.title = 'Retirer des favoris';
-    showToast('Ajouté aux favoris', 'success');
-  } else {
-    starredUids.delete(uid);
-    btn.innerHTML = '<i class="fa-regular fa-star" style="color:var(--text-dim);"></i>';
-    btn.title = 'Ajouter aux favoris';
-    showToast('Retiré des favoris', 'info');
+  if (data.success) {
+    btn.className = `mail-star ${data.starred?'active':''}`;
+    btn.innerHTML = `<i class="fa ${data.starred?'fa-solid':'fa-regular'} fa-star"></i>`;
+    showToast(data.starred?'Ajouté aux favoris':'Retiré des favoris','info');
   }
 }
 
-async function loadStarred() {
-  try {
-    const res = await fetch('/api/mails/starred');
-    const data = await res.json();
-    starredUids = new Set(data.starred.map(s => s.mail_uid));
-  } catch {}
+// ===== SELECT / BULK =====
+function toggleSelect(uid, cb) {
+  if (cb.checked) selectedIds.add(uid);
+  else selectedIds.delete(uid);
+  const el = document.querySelector(`.mail-item[data-uid="${uid}"]`);
+  if (el) el.classList.toggle('selected', cb.checked);
+  updateBulkBar();
 }
 
-// ===== SELECTION =====
-function toggleSelect(uid) {
-  if (selectedUids.has(uid)) selectedUids.delete(uid);
-  else selectedUids.add(uid);
-  updateBulkActions();
-  renderMails(currentMails);
-}
-function toggleSelectAll() {
-  const all = document.getElementById('selectAll').checked;
-  if (all) currentMails.forEach(m => selectedUids.add(m.uid));
-  else selectedUids.clear();
-  updateBulkActions();
-  renderMails(currentMails);
-}
-function updateBulkActions() {
-  const bulk = document.getElementById('bulk-actions');
-  bulk.style.display = selectedUids.size > 0 ? 'flex' : 'none';
+function toggleSelectAll(checked) {
+  document.querySelectorAll('.mail-item').forEach(el => {
+    const uid = el.dataset.uid;
+    const cb = el.querySelector('.mail-cb');
+    if (checked) selectedIds.add(uid); else selectedIds.delete(uid);
+    el.classList.toggle('selected', checked);
+    if (cb) cb.checked = checked;
+  });
+  updateBulkBar();
 }
 
-async function bulkMarkRead(read) {
-  for (const uid of selectedUids) {
-    await fetch('/api/mails/mark-read', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({uid,folder:currentFolder,seen:read}) });
-  }
-  showToast(`${selectedUids.size} mail(s) marqué(s) comme ${read?'lus':'non lus'}`, 'success');
-  selectedUids.clear();
+function updateBulkBar() {
+  const bar = document.getElementById('bulk-actions');
+  bar.style.display = selectedIds.size > 0 ? 'flex' : 'none';
+}
+
+async function bulkAction(action, idsOverride) {
+  const ids = idsOverride || Array.from(selectedIds);
+  if (!ids.length) return;
+  await fetch('/api/mails/bulk', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,action})});
+  showToast(`Action "${action}" sur ${ids.length} mail(s)`, 'success');
+  selectedIds.clear();
+  document.getElementById('select-all').checked = false;
   loadMails();
-}
-
-async function bulkDelete() {
-  if (!confirm(`Supprimer ${selectedUids.size} mail(s) ?`)) return;
-  for (const uid of selectedUids) {
-    await fetch(`/api/mails/${uid}/delete?folder=${encodeURIComponent(currentFolder)}`, { method:'DELETE' });
-  }
-  showToast(`${selectedUids.size} mail(s) supprimé(s)`, 'success');
-  selectedUids.clear();
-  loadMails();
-}
-
-// ===== FILTERS =====
-function setFilter(filter, btn) {
-  activeFilter = filter;
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  renderMails(currentMails);
 }
 
 // ===== SNOOZE =====
-function openSnooze(uid) {
-  const wake = prompt('Snooze jusqu\'à quelle date/heure ? (ex: 2026-03-16T09:00:00)');
-  if (!wake) return;
-  fetch('/api/mails/snooze', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({uid,folder:currentFolder,wake_at:wake}) })
-    .then(() => showToast('Mail endormi jusqu\'à ' + wake, 'info'));
+function openSnoozeFor(uid) {
+  snoozingMailId = uid;
+  const m = document.getElementById('snooze-modal');
+  m.style.display = 'flex';
+}
+function previewSnooze() { if (splitMailId) openSnoozeFor(splitMailId); }
+function closeSnooze() { document.getElementById('snooze-modal').style.display = 'none'; document.getElementById('snooze-custom').style.display='none'; }
+
+function setSnooze(n, unit) {
+  if (unit==='custom') { document.getElementById('snooze-custom').style.display='block'; return; }
+  const d = new Date();
+  if (unit==='hour') d.setHours(d.getHours()+n);
+  else if (unit==='day') { d.setDate(d.getDate()+n); d.setHours(8,0,0,0); }
+  confirmSnoozeAt(d.toISOString().slice(0,19));
+}
+
+async function confirmSnooze() {
+  const custom = document.getElementById('snooze-custom');
+  let dt;
+  if (custom.style.display !== 'none' && custom.value) dt = custom.value.replace('T',' ');
+  else { closeSnooze(); return; }
+  confirmSnoozeAt(dt);
+}
+
+async function confirmSnoozeAt(dt) {
+  if (!snoozingMailId) return;
+  const res = await fetch(`/api/mail/${snoozingMailId}/snooze`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({snooze_until:dt})
+  });
+  const data = await res.json();
+  closeSnooze();
+  if (data.success) { showToast('Mail reporté ✓', 'success'); loadMails(); }
+  else showToast('Erreur snooze', 'error');
 }
 
 // ===== SPLIT VIEW =====
-async function openSplitPreview(uid, from) {
-  const pane = document.getElementById('split-pane');
-  const content = document.getElementById('split-content');
-  pane.style.width = '380px';
-  splitPaneOpen = true;
-  content.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-    <div class="avatar avatar-sm" style="background:linear-gradient(135deg,var(--primary),var(--accent2));flex-shrink:0;">${esc(from)[0]||'?'}</div>
-    <span style="font-size:13px;font-weight:600;">${esc(from)}</span>
-    <button onclick="closeSplitPane()" style="margin-left:auto;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:18px;"><i class="fa fa-xmark"></i></button>
-  </div><div class="skeleton" style="height:200px;border-radius:8px;"></div>`;
-  try {
-    const res = await fetch(`/api/mail/${uid}?folder=${encodeURIComponent(currentFolder)}`);
-    const mail = await res.json();
-    content.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px;">
-        <button onclick="closeSplitPane()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:18px;"><i class="fa fa-xmark"></i></button>
-        <a href="/mail/${uid}?folder=${encodeURIComponent(currentFolder)}" class="btn btn-ghost btn-sm" style="margin-left:auto;">Ouvrir <i class="fa fa-arrow-right"></i></a>
-      </div>
-      <div style="font-size:18px;font-weight:700;margin-bottom:8px;">${esc(mail.subject||'(sans sujet)')}</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">De : ${esc(mail.from||'')}</div>
-      <div style="font-size:12px;color:var(--text-dim);margin-bottom:20px;">${fmtDate(mail.date)}</div>
-      <div style="font-size:13px;line-height:1.7;color:var(--text-muted);word-break:break-word;">${mail.body_html || esc(mail.body_text||'').replace(/\n/g,'<br>')}</div>`;
-  } catch { content.innerHTML += '<p style="color:var(--accent2);">Erreur de chargement</p>'; }
-}
-
-function closeSplitPane() {
-  document.getElementById('split-pane').style.width = '0';
-  splitPaneOpen = false;
-}
-
-// ===== AI PANEL =====
-function toggleAIPanel() {
-  aiPanelOpen = !aiPanelOpen;
-  const panel = document.getElementById('ai-panel');
-  panel.style.width = aiPanelOpen ? '360px' : '0';
-  document.getElementById('ai-toggle-btn').style.background = aiPanelOpen ? 'rgba(108,99,255,0.2)' : '';
-  document.getElementById('ai-toggle-btn').style.borderColor = aiPanelOpen ? 'var(--primary)' : '';
-}
-
-async function sendAI() {
-  const input = document.getElementById('ai-input');
-  const msg = input.value.trim();
-  if (!msg || aiLoading) return;
-  input.value = '';
-  appendAIMsg('user', msg);
-  aiLoading = true;
-  const typingId = appendAIMsg('assistant', '<span class="ai-typing"><i></i><i></i><i></i></span>', true);
-  try {
-    const res = await fetch('/api/ai/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:msg}) });
-    const data = await res.json();
-    document.getElementById(typingId)?.remove();
-    appendAIMsg('assistant', data.response || data.detail || 'Erreur');
-  } catch(e) {
-    document.getElementById(typingId)?.remove();
-    appendAIMsg('assistant', 'Erreur de connexion à Awlor AI.');
-  }
-  aiLoading = false;
-}
-
-function aiQuick(prompt) {
-  document.getElementById('ai-input').value = prompt;
-  sendAI();
-  if (!aiPanelOpen) toggleAIPanel();
-}
-
-function appendAIMsg(role, content, isTyping = false) {
-  const msgs = document.getElementById('ai-messages');
-  const div = document.createElement('div');
-  const id = 'ai-msg-' + Date.now();
-  div.id = id;
-  const isUser = role === 'user';
-  div.style.cssText = `display:flex;gap:10px;align-items:flex-start;animation:mailItemIn 0.3s ease;${isUser?'flex-direction:row-reverse;':''}`;
-  div.innerHTML = `
-    <div style="width:28px;height:28px;border-radius:8px;background:${isUser?'linear-gradient(135deg,var(--primary),var(--accent2))':'linear-gradient(135deg,#1a1a3e,var(--primary))'};display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;">
-      <i class="fa ${isUser?'fa-user':'fa-robot'}"></i>
+async function openSplit(uid, e) {
+  if (e && e.target && e.target.type === 'checkbox') return;
+  splitMailId = uid;
+  const panel = document.getElementById('split-panel');
+  panel.style.width = '400px';
+  document.getElementById('preview-body').innerHTML = renderSkeletons(3);
+  document.getElementById('preview-title').textContent = 'Chargement...';
+  document.getElementById('preview-open').href = `/mail/${uid}?folder=${encodeURIComponent(currentFolder)}`;
+  const res = await fetch(`/api/mail/${uid}`);
+  const mail = await res.json();
+  if (mail.error) { document.getElementById('preview-body').innerHTML = '<p style="color:var(--accent2)">Erreur</p>'; return; }
+  document.getElementById('preview-title').textContent = mail.subject || '(Sans objet)';
+  document.getElementById('preview-body').innerHTML = `
+    <div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border);">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;">De : <strong style="color:var(--text)">${esc(mail.from)}</strong></div>
+      <div style="font-size:12px;color:var(--text-dim);">À : <strong style="color:var(--text)">${esc(mail.to)}</strong></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px;">${fmtDate(mail.date)}</div>
     </div>
-    <div style="flex:1;background:${isUser?'rgba(108,99,255,0.12)':'rgba(255,255,255,0.04)'};border:1px solid ${isUser?'rgba(108,99,255,0.25)':'var(--border)'};border-radius:${isUser?'12px 4px 12px 12px':'4px 12px 12px 12px'};padding:10px 14px;font-size:13px;line-height:1.6;word-break:break-word;white-space:pre-wrap;">${content}</div>`;
-  msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
-  return id;
+    ${mail.body_html
+      ? `<iframe srcdoc="${mail.body_html.replace(/"/g,'&quot;')}" style="width:100%;height:calc(100vh - 300px);border:none;background:#fff;border-radius:6px;"></iframe>`
+      : `<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.7;">${esc(mail.body_text||'')}</pre>`
+    }`;
+  loadMails();
 }
 
-async function loadAIHistory() {
-  try {
-    const res = await fetch('/api/ai/history');
-    const data = await res.json();
-    data.history.forEach(m => appendAIMsg(m.role, m.content));
-    if (!data.history.length) appendAIMsg('assistant', 'Bonjour ! Je suis Awlor AI. Je peux résumer vos mails, détecter le spam, rédiger des réponses, traduire ou trier votre boîte. Comment puis-je vous aider ?');
-  } catch {}
+function closeSplit() {
+  document.getElementById('split-panel').style.width = '0';
+  splitMailId = null;
 }
 
-async function clearAIHistory() {
-  await fetch('/api/ai/history', { method:'DELETE' });
-  document.getElementById('ai-messages').innerHTML = '';
-  appendAIMsg('assistant', 'Historique effacé. Comment puis-je vous aider ?');
-  showToast('Historique IA effacé', 'info');
-}
+function previewStar() { if (splitMailId) toggleStar(splitMailId, document.getElementById('preview-star-btn')); }
+function previewReply() { if (splitMailId) window.location.href = `/compose?reply_to=${splitMailId}`; }
 
 // ===== FOCUS MODE =====
 function toggleFocusMode() {
-  focusMode = !focusMode;
-  const overlay = document.getElementById('focus-overlay');
-  overlay.style.display = focusMode ? 'block' : 'none';
-  if (focusMode) {
-    const content = document.getElementById('focus-content');
-    const mail = currentMails[0];
-    if (mail) {
-      content.innerHTML = `<h1 style="font-size:28px;margin-bottom:24px;font-weight:700;color:#fff;">${esc(mail.subject||'')}</h1><p style="color:#aaa;margin-bottom:32px;">De : ${esc(mail.from||'')} &mdash; ${fmtDate(mail.date)}</p><p style="color:#ccc;">Cliquez sur un mail pour l'ouvrir en focus mode, ou appuyez sur F pour quitter.</p>`;
-    } else {
-      content.innerHTML = '<p style="color:#888;">Aucun mail à afficher en focus mode.</p>';
-    }
+  document.body.classList.toggle('focus-mode');
+  const btn = document.getElementById('focus-btn');
+  if (document.body.classList.contains('focus-mode')) {
+    btn.innerHTML = '<i class="fa fa-compress"></i>';
+    if (splitMailId) document.getElementById('split-panel').style.width = '100%';
+  } else {
+    btn.innerHTML = '<i class="fa fa-expand"></i>';
   }
 }
 
 // ===== HEATMAP =====
-function drawHeatmap() {
-  const canvas = document.getElementById('heatmapCanvas');
+async function loadHeatmap() {
+  const res = await fetch('/api/heatmap');
+  const data = await res.json();
+  const canvas = document.getElementById('heatmap-canvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  const data = Array(24).fill(0).map(() => Math.floor(Math.random()*10));
-  const max = Math.max(...data, 1);
-  const barW = canvas.width / 24;
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  data.forEach((v, i) => {
-    const h = (v / max) * canvas.height;
-    const alpha = 0.2 + (v/max) * 0.8;
+  canvas.width = canvas.offsetWidth * window.devicePixelRatio || 200;
+  canvas.height = 48 * window.devicePixelRatio;
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  const w = canvas.offsetWidth || 200;
+  const h = 48;
+  const vals = data.heatmap || new Array(24).fill(0);
+  const max = Math.max(...vals, 1);
+  const barW = w / 24;
+  vals.forEach((v, i) => {
+    const bh = Math.max(2, (v/max)*(h-8));
+    const alpha = 0.3 + 0.7*(v/max);
     ctx.fillStyle = `rgba(108,99,255,${alpha})`;
     ctx.beginPath();
-    ctx.roundRect(i*barW+1, canvas.height-h, barW-2, h, 2);
+    ctx.roundRect(i*barW+1, h-bh, barW-2, bh, 2);
     ctx.fill();
   });
+}
+
+// ===== FOLLOW-UP =====
+async function checkFollowup() {
+  const res = await fetch('/api/stats');
+  const data = await res.json();
+  if (data.followup_count > 0) {
+    const bar = document.getElementById('followup-bar');
+    const alerts = data.followup_alerts || [];
+    document.getElementById('followup-text').textContent =
+      `${data.followup_count} mail(s) en attente de réponse — ${alerts[0]?alerts[0].subject:''}`;
+    bar.style.display = 'block';
+  }
+  const badge = document.getElementById('unread-badge');
+  if (badge && data.unread > 0) { badge.textContent = data.unread; badge.style.display = 'inline-flex'; }
+}
+
+// ===== COMMAND PALETTE =====
+const CMD_ACTIONS = [
+  {label:'Nouveau mail',icon:'fa-pen-to-square',fn:()=>window.location.href='/compose'},
+  {label:'Boîte de réception',icon:'fa-inbox',fn:()=>switchFolder('INBOX',document.querySelector('.nav-item'))},
+  {label:'Envoyés',icon:'fa-paper-plane',fn:()=>window.location.href='/inbox?folder=Sent'},
+  {label:'Brouillons',icon:'fa-file-lines',fn:()=>window.location.href='/inbox?folder=Drafts'},
+  {label:'Corbeille',icon:'fa-trash',fn:()=>window.location.href='/inbox?folder=Trash'},
+  {label:'Profil',icon:'fa-user',fn:()=>window.location.href='/profile'},
+  {label:'IA Awlor',icon:'fa-robot',fn:()=>window.location.href='/ai'},
+  {label:'Règles de tri',icon:'fa-filter',fn:()=>window.location.href='/rules'},
+  {label:'Templates',icon:'fa-rectangle-list',fn:()=>window.location.href='/templates'},
+  {label:'Timeline contact',icon:'fa-timeline',fn:()=>window.location.href='/timeline'},
+  {label:'Filtrer: Non lus',icon:'fa-envelope',fn:()=>setFilter('unread',document.querySelector('[data-f="unread"]'))},
+  {label:'Filtrer: Étoilés',icon:'fa-star',fn:()=>setFilter('starred',document.querySelector('[data-f="starred"]'))},
+  {label:'Rafraîchir',icon:'fa-rotate-right',fn:()=>loadMails()},
+  {label:'Déconnexion',icon:'fa-right-from-bracket',fn:()=>window.location.href='/logout'},
+];
+
+function openCmd() {
+  document.getElementById('cmd-overlay').style.display = 'block';
+  setTimeout(()=>document.getElementById('cmd-input').focus(),50);
+  renderCmdResults('');
+}
+function closeCmd() { document.getElementById('cmd-overlay').style.display = 'none'; }
+
+function renderCmdResults(q) {
+  const el = document.getElementById('cmd-results');
+  const filtered = q ? CMD_ACTIONS.filter(a=>a.label.toLowerCase().includes(q.toLowerCase())) : CMD_ACTIONS;
+  el.innerHTML = filtered.length ? filtered.map((a,i)=>`
+    <button onclick="CMD_ACTIONS.find(x=>x.label==='${a.label.replace(/'/g,"\\'")}')?._fn&&CMD_ACTIONS.find(x=>x.label==='${a.label.replace(/'/g,"\\'")}')?._fn();closeCmd();"
+      style="display:flex;align-items:center;gap:12px;width:100%;padding:11px 14px;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:14px;border-radius:8px;font-family:var(--font);transition:var(--transition);"
+      onmouseenter="this.style.background='var(--bg-card-hover)';this.style.color='var(--text)'"
+      onmouseleave="this.style.background='none';this.style.color='var(--text-muted)'">
+      <i class="fa ${a.icon}" style="width:18px;color:var(--primary)"></i>${a.label}
+    </button>`).join('') :
+    '<p style="padding:20px;text-align:center;color:var(--text-dim);font-size:13px;">Aucun résultat</p>';
+}
+
+function cmdSearch(q) { renderCmdResults(q); }
+function cmdKey(e) {
+  if (e.key==='Escape') closeCmd();
+  if (e.key==='Enter') {
+    const first = document.querySelector('#cmd-results button');
+    if (first) first.click();
+  }
 }
 
 // ===== PAGINATION =====
@@ -530,23 +527,21 @@ function renderPagination(page, pages, total) {
   if (pages <= 1) { pg.innerHTML = `<span style="font-size:12px;color:var(--text-muted);">${total} mail${total>1?'s':''}</span>`; return; }
   pg.innerHTML = `
     <button class="btn btn-ghost btn-sm" onclick="goPage(${page-1})" ${page<=1?'disabled':''}><i class="fa fa-chevron-left"></i></button>
-    <span style="font-size:12px;color:var(--text-muted);">${page} / ${pages}</span>
+    <span style="font-size:12px;color:var(--text-muted);">${page} / ${pages} &nbsp;(${total} mails)</span>
     <button class="btn btn-ghost btn-sm" onclick="goPage(${page+1})" ${page>=pages?'disabled':''}><i class="fa fa-chevron-right"></i></button>`;
 }
 function goPage(p) { if (p<1||p>totalPages) return; currentPage=p; loadMails(); }
 
+// ===== STATS / UNREAD =====
 async function loadStats() {
-  try {
-    const res = await fetch('/api/stats');
-    const data = await res.json();
-    const b = document.getElementById('unreadBadge');
-    if (data.unseen > 0) { b.textContent = data.unseen; b.style.display = 'inline-flex'; }
-    document.getElementById('unread-badge') && (document.getElementById('unread-badge').textContent = data.unseen > 0 ? data.unseen : '');
-    document.getElementById('unread-badge') && (document.getElementById('unread-badge').style.display = data.unseen > 0 ? 'inline-flex' : 'none');
-  } catch {}
+  const res = await fetch('/api/stats');
+  const data = await res.json();
+  const b = document.getElementById('unread-badge');
+  if (b && data.unread > 0) { b.textContent = data.unread; b.style.display = 'inline-flex'; }
 }
 
-function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+document.getElementById('searchInput').addEventListener('input', () => loadMails());
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtDate(d) {
   if (!d) return '';
   try {
@@ -557,14 +552,4 @@ function fmtDate(d) {
   } catch { return d; }
 }
 </script>
-
-<style>
-.filter-btn.active { background:rgba(108,99,255,0.15);border-color:rgba(108,99,255,0.4);color:var(--primary-light); }
-.mail-item.selected { background:rgba(108,99,255,0.1);border-left:3px solid var(--primary); }
-.ai-typing { display:inline-flex;gap:4px;align-items:center; }
-.ai-typing i { width:6px;height:6px;border-radius:50%;background:var(--primary);animation:aiDot 1.2s ease-in-out infinite; }
-.ai-typing i:nth-child(2) { animation-delay:0.2s; }
-.ai-typing i:nth-child(3) { animation-delay:0.4s; }
-@keyframes aiDot { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} }
-</style>
 {% endblock %}

@@ -35,15 +35,17 @@ def _format_from(display_name: str, address: str) -> str:
 
 
 def get_folders(user: dict):
-    return ['INBOX', 'Sent', 'Trash']
+    return ['INBOX', 'Sent', 'Drafts', 'Snoozed', 'Starred', 'Spam', 'Trash', 'Archive']
 
 
-def get_mails(user: dict, folder: str = 'INBOX', page: int = 1, per_page: int = 20, address: str = None):
+def get_mails(user: dict, folder: str = 'INBOX', page: int = 1, per_page: int = 20,
+              address: str = None, filter_type: str = ''):
     from database import get_inbound_mails, get_inbound_mails_multi, get_all_addresses_for_user
     if address:
         return get_inbound_mails(mail_to=address, folder=folder, page=page, per_page=per_page)
     addresses = get_all_addresses_for_user(user['id'])
-    return get_inbound_mails_multi(addresses=addresses, folder=folder, page=page, per_page=per_page)
+    return get_inbound_mails_multi(addresses=addresses, folder=folder, page=page,
+                                   per_page=per_page, filter_type=filter_type)
 
 
 def get_mail(user: dict, uid: str, folder: str = 'INBOX'):
@@ -55,22 +57,14 @@ def get_mail(user: dict, uid: str, folder: str = 'INBOX'):
 
 
 def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False, from_address: str = None):
-    """
-    Envoi via Resend REST API (SDK officiel).
-    La cle API = global_smtp_password en BDD (ou RESEND_API_KEY en env).
-    """
     cfg = _get_config()
     api_key = cfg['api_key']
-
     if not api_key:
         return False, "Cle API Resend manquante (configurez global_smtp_password dans le panel admin)"
-
     resend.api_key = api_key
-
     raw_addr = _resolve_from_address(user, from_address)
     display_name = (user or {}).get('display_name', '') or ''
     from_header = _format_from(display_name, raw_addr)
-
     try:
         params = {
             "from": from_header or raw_addr,
@@ -81,9 +75,7 @@ def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False, 
             params["html"] = body
         else:
             params["text"] = body
-
         result = resend.Emails.send(params)
-        # SDK retourne un dict avec 'id' si succes, ou leve une exception
         if result and result.get('id'):
             return True, None
         return False, str(result)
@@ -105,10 +97,6 @@ def delete_mail(user: dict, uid: str, folder: str = 'INBOX'):
 
 
 def test_smtp_connection(api_key: str):
-    """
-    Teste la cle API Resend en envoyant un email de test a delivered@resend.dev
-    (adresse de test officielle Resend qui accepte tout sans erreur).
-    """
     if not api_key:
         return False, "Cle API vide"
     try:
