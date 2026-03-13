@@ -75,7 +75,11 @@ document.addEventListener('click', e => {
 
 // ========== KEYBOARD SHORTCUTS ==========
 document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const tag = e.target.tagName;
+  const isEditable = e.target.isContentEditable;
+  const onCompose = window.location.pathname.startsWith('/compose');
+  // Ne pas déclencher les raccourcis dans les champs de saisie ou sur /compose
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || isEditable || onCompose) return;
   if (e.key === 'n' || e.key === 'N') window.location.href = '/compose';
   if (e.key === 'Escape') {
     const path = window.location.pathname;
