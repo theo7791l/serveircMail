@@ -34,6 +34,16 @@ def _format_from(display_name: str, address: str) -> str:
     return address
 
 
+def _user_owns_mail(user: dict, mail: dict) -> bool:
+    """Retourne True si le mail appartient a l'utilisateur (via mail_to OU mail_from)."""
+    from database import get_all_addresses_for_user
+    addresses = [a.lower() for a in get_all_addresses_for_user(user['id'])]
+    return (
+        mail.get('to', mail.get('mail_to', '')).lower() in addresses
+        or mail.get('from', mail.get('mail_from', '')).lower() in addresses
+    )
+
+
 def get_folders(user: dict):
     return ['INBOX', 'Sent', 'Drafts', 'Snoozed', 'Starred', 'Spam', 'Trash', 'Archive']
 
@@ -89,14 +99,12 @@ def send_mail(user: dict, to: str, subject: str, body: str, html: bool = False, 
 
 
 def delete_mail(user: dict, uid: str, folder: str = 'INBOX'):
-    from database import delete_inbound_mail, get_inbound_mail_by_id, get_all_addresses_for_user
+    from database import delete_inbound_mail, get_inbound_mail_by_id
     mail = get_inbound_mail_by_id(int(uid))
     if not mail:
         return False, 'Mail introuvable'
-    if user:
-        addresses = get_all_addresses_for_user(user['id'])
-        if mail['mail_to'].lower() not in [a.lower() for a in addresses]:
-            return False, 'Acces refuse'
+    if user and not _user_owns_mail(user, mail):
+        return False, 'Acces refuse'
     ok = delete_inbound_mail(int(uid))
     return (True, None) if ok else (False, 'Erreur suppression')
 

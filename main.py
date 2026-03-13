@@ -67,7 +67,6 @@ async def login_page(request: Request):
 
 @app.post("/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
-    # Validation taille
     if len(username) > MAX_USERNAME_LEN or len(password) > 200:
         return RedirectResponse("/login?error=invalid", status_code=302)
     ip = auth.get_client_ip(request)
@@ -103,7 +102,6 @@ async def register(request: Request,
     password: str = Form(...),
     mail_prefix: str = Form(...)):
 
-    # Validation taille des inputs
     if (len(username) > MAX_USERNAME_LEN or len(display_name) > MAX_NAME_LEN
             or len(email) > 254 or len(password) > 200 or len(mail_prefix) > 64):
         return RedirectResponse("/register?error=invalid", status_code=302)
@@ -156,7 +154,6 @@ async def verify_page(request: Request, email: str = ""):
 
 @app.post("/verify")
 async def verify(request: Request, email: str = Form(...), code: str = Form(...)):
-    # Validation taille
     if len(email) > 254 or len(code) > 20:
         return render("verify.html", request, {"email": email, "error": "Code invalide"})
     ok, result = db.confirm_pending_user(email, code.strip())
@@ -270,7 +267,6 @@ async def update_profile(request: Request,
     display_name: str = Form(...),
     new_password: str = Form(default=""),
     user=Depends(auth.require_auth)):
-    # Validation taille
     if len(display_name) > MAX_NAME_LEN:
         return RedirectResponse("/profile?error=invalid", status_code=302)
     if new_password and len(new_password) > 200:
@@ -312,7 +308,6 @@ async def ai_page(request: Request, user=Depends(auth.require_auth)):
 
 @app.post("/webhook/inbound")
 async def inbound_webhook(request: Request):
-    # Vérification signature HMAC Resend
     raw_body = await request.body()
     webhook_secret = db.get_setting("webhook_secret", "")
     signature = request.headers.get("Resend-Signature", "")
@@ -348,7 +343,6 @@ async def inbound_webhook(request: Request):
             new_mail_id = cur.lastrowid
             conn_tmp.close()
             db.apply_mail_rules(recipient_user["id"], new_mail_id, mail_from, subject)
-            # Notif email si activé
             notif_prefs = db.get_notification_prefs(recipient_user["id"])
             if notif_prefs.get("notify_new_mail") and recipient_user.get("email"):
                 site_name = db.get_setting("site_name", "Awlor")
@@ -808,8 +802,25 @@ async def api_send(request: Request, user=Depends(auth.require_auth)):
 async def api_delete(uid: int, user=Depends(auth.require_auth)):
     if not db.user_has_perm(user["id"], "can_delete_mail"):
         raise HTTPException(403)
-    ok, err = email_client.delete_mail(user, uid=str(uid))
-    return {"success": ok, "error": err}
+    mail = db.get_inbound_mail_by_id(uid)
+    if not mail:
+        raise HTTPException(404)
+    user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
+    if mail.get("to", "").lower() not in user_addrs and mail.get("from", "").lower() not in user_addrs:
+        raise HTTPException(403, detail="Acc\u00e8s refus\u00e9")
+    ok = db.delete_inbound_mail(uid)
+    return JSONResponse({"success": ok})
+
+@app.post("/api/mail/{uid}/spam")
+async def api_spam(uid: int, user=Depends(auth.require_auth)):
+    mail = db.get_inbound_mail_by_id(uid)
+    if not mail:
+        raise HTTPException(404)
+    user_addrs = [a.lower() for a in db.get_all_addresses_for_user(user["id"])]
+    if mail.get("to", "").lower() not in user_addrs and mail.get("from", "").lower() not in user_addrs:
+        raise HTTPException(403, detail="Acc\u00e8s refus\u00e9")
+    db.move_mail(uid, "Spam")
+    return JSONResponse({"success": True})
 
 @app.post("/api/mail/{uid}/move")
 async def api_move(uid: int, request: Request, user=Depends(auth.require_auth)):
@@ -853,9 +864,8 @@ async def api_bulk(request: Request, user=Depends(auth.require_auth)):
     action = data.get("action", "")
     if not mail_ids or not action:
         return JSONResponse({"success": False, "error": "Param\u00e8tres manquants"})
-    # Limite le nombre d'IDs par requête bulk pour éviter les abus
     if len(mail_ids) > 200:
-        raise HTTPException(400, detail="Trop d'IDs dans une seule requête (max 200)")
+        raise HTTPException(400, detail="Trop d'IDs dans une seule requ\u00eate (max 200)")
     addresses = db.get_all_addresses_for_user(user["id"])
     db.bulk_action_mails(mail_ids, action, addresses)
     return JSONResponse({"success": True, "count": len(mail_ids)})
@@ -895,7 +905,6 @@ async def api_followup_alerts(user=Depends(auth.require_auth)):
 
 @app.post("/api/followup/{fid}/dismiss")
 async def api_followup_dismiss(fid: int, user=Depends(auth.require_auth)):
-    # Fix IDOR : vérifie que le follow-up appartient bien à l'utilisateur courant
     conn = db.get_conn()
     row = conn.execute("SELECT user_id FROM followup_tracker WHERE id=?", (fid,)).fetchone()
     conn.close()
@@ -1064,7 +1073,7 @@ async def api_ai_chat(request: Request, user=Depends(auth.require_auth)):
         return JSONResponse({"success": False, "error": "Cl\u00e9 Groq non configur\u00e9e."})
     groq_model = db.get_setting("groq_model", "llama-3.3-70b-versatile")
     data = await request.json()
-    user_message = data.get("message", "").strip()[:2000]  # Limite le prompt utilisateur
+    user_message = data.get("message", "").strip()[:2000]
     mail_context = data.get("mail_context", None)
     action = data.get("action", "chat")
     history = db.get_ai_history(user["id"], limit=10)
